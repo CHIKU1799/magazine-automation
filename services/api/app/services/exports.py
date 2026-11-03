@@ -6,6 +6,7 @@ layout_json             -> the validated layout contract
 content_package         -> approved articles as Markdown + JSON (zip)
 asset_archive           -> stored project assets (zip)
 indd                    -> InDesign bridge only; never faked
+idml                    -> InDesign package built here (IDML + linked pictures, zip): open in InDesign, save as .indd
 """
 
 from __future__ import annotations
@@ -29,7 +30,7 @@ from app.services.project_context import asset_resolver, dump, online_bridges, p
 from app.services.renderers import render_contract
 from app.services.storage import get_storage
 
-FILE_EXT = {"pdf_digital": ".pdf", "pdf_print": ".pdf", "indd": ".indd", "page_previews": ".zip",
+FILE_EXT = {"pdf_digital": ".pdf", "pdf_print": ".pdf", "indd": ".indd", "idml": ".zip", "page_previews": ".zip",
             "content_package": ".zip", "asset_archive": ".zip", "layout_json": ".json"}
 CONTENT_TYPES = {".pdf": "application/pdf", ".zip": "application/zip", ".json": "application/json",
                  ".indd": "application/x-indesign"}
@@ -41,7 +42,8 @@ def slugify(s: str) -> str:
 
 
 def file_name_for(project: Project, fmt: str) -> str:
-    suffix = {"pdf_digital": "digital", "pdf_print": "print", "indd": "indesign", "page_previews": "page-previews",
+    suffix = {"pdf_digital": "digital", "pdf_print": "print", "indd": "indesign", "idml": "indesign-idml",
+              "page_previews": "page-previews",
               "content_package": "content", "asset_archive": "assets", "layout_json": "layout"}[fmt]
     return f"{slugify(project.title)}-{suffix}{FILE_EXT[fmt]}"
 
@@ -138,6 +140,9 @@ def run_export(ctx: JobContext) -> None:
             else:
                 data = res.pdf
             warnings = res.warnings
+        elif fmt == "idml":
+            data, warnings = _idml(db, project)
+            ctx.progress(80, "InDesign package written")
         elif fmt == "layout_json":
             data = json.dumps(contract, indent=2, ensure_ascii=False).encode("utf-8")
             warnings = []
@@ -167,6 +172,23 @@ def run_export(ctx: JobContext) -> None:
             project.status = "exported"
         db.commit()
         ctx.set_result(exp.id)
+
+
+def _idml(db: Session, project: Project) -> tuple[bytes, list[str]]:
+    """The InDesign package is built from the saved pages (server contract: dynamic frames filled, imported frames'
+    own fonts), plus the frames' rotation, which the contract doesn't carry."""
+    from app.services.project_context import pages_dicts, project_contract
+    from app.services.renderers.idml_renderer import render_idml
+
+    contract = project_contract(db, project)
+    rotations = {}
+    for i, p in enumerate(pages_dicts(db, project.id)):
+        for el in p.get("elements") or []:
+            if el.get("rotation"):
+                fid = f"p{i + 1}_{el['id']}" if el["id"].startswith("el_") else el["id"]
+                rotations[fid] = float(el["rotation"])
+    res = render_idml(contract, asset_resolver(db, project.id), rotations)
+    return res.data, res.warnings
 
 
 def _rasterise(pdf: bytes, scale: float = 1.5) -> bytes:

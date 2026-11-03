@@ -77,10 +77,14 @@ export function deriveCoverTemplate(page: ReferencePage, referenceTitle: string)
   const vision = page.blocks.filter((b) => b.coverRole);
   if (!vision.length) return null;
   const id = `tpl_ref_${page.referenceId}_p${page.pageNumber}`;
-  const slots: TemplateSlot[] = [{ id: "bg", role: "hero_image", x: 0, y: 0, w: 1, h: 1, name: "Cover image", bleed: edges(0, 0, 1, 1) }];
+  // The largest placed photograph becomes the cover image; without one, the cover image fills the page.
+  const photos = vision.filter((b) => b.coverRole === "photo").sort((a, b) => b.w * b.h - a.w * a.h);
+  const hero = photos[0] ?? { x: 0, y: 0, w: 1, h: 1 };
+  const slots: TemplateSlot[] = [{ id: "bg", role: "hero_image", x: hero.x, y: hero.y, w: hero.w, h: hero.h, name: "Cover image", bleed: edges(hero.x, hero.y, hero.w, hero.h) }];
   vision
     .filter((b) => b.coverRole === "band")
     .forEach((b, i) => slots.push({ id: `band${i + 1}`, role: "background", x: b.x, y: b.y, w: b.w, h: b.h, name: "Band", fill: b.fill, opacity: 1, bleed: edges(b.x, b.y, b.w, b.h) }));
+  photos.slice(1).forEach((b, i) => slots.push({ id: `photo${i + 1}`, role: "image", x: b.x, y: b.y, w: b.w, h: b.h, name: "Photo", bleed: edges(b.x, b.y, b.w, b.h) }));
   const logos = vision.filter((b) => b.coverRole === "logo" || (b.coverRole === "masthead" && b.kind === "image"));
   logos.forEach((b, i) => {
     const sid = `logo${i + 1}`;
@@ -113,7 +117,7 @@ export function deriveCoverTemplate(page: ReferencePage, referenceTitle: string)
     pageType: "cover",
     source: "reference",
     referencePageNumber: page.pageNumber,
-    description: `Rebuilt from page ${page.pageNumber} of ${referenceTitle}: ${slots.length} frames — live masthead, headline and cover lines, ${logos.length} logo graphic(s) and the cover image.`,
+    description: `Rebuilt from page ${page.pageNumber} of ${referenceTitle}: ${slots.length} frames — live masthead, headline and cover lines, ${logos.length} logo graphic(s) and ${Math.max(1, photos.length)} photo frame(s).`,
     slots,
     columns: 1,
   };

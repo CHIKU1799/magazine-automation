@@ -30,6 +30,8 @@ interface Props {
   setEditingText: (id: string | null) => void;
   cropping: string | null;
   setCropping: (id: string | null) => void;
+  /** Double-click on an empty image frame: choose a photograph for it. */
+  onPlaceImage: (id: string) => void;
 }
 
 /** Edges the selection snaps to: trim, live area, column edges and centre. */
@@ -56,7 +58,7 @@ function snap(value: number, size: number, lines: number[], tolerance: number): 
 }
 
 export function EditorCanvas(props: Props) {
-  const { page, profile, assets, ctx, scale, localUrls, selectedId, showGuides, showBleed, onSelect, onBeginChange, onChange, onOverset, editingText, setEditingText, cropping, setCropping } = props;
+  const { page, profile, assets, ctx, scale, localUrls, selectedId, showGuides, showBleed, onSelect, onBeginChange, onChange, onOverset, editingText, setEditingText, cropping, setCropping, onPlaceImage } = props;
   const [guides, setGuides] = React.useState<{ x?: number; y?: number }>({});
   const selected = page.elements.find((e) => e.id === selectedId);
   const lines = React.useMemo(() => snapLines(profile, ctx.pageNumber), [profile, ctx.pageNumber]);
@@ -66,7 +68,8 @@ export function EditorCanvas(props: Props) {
     e.stopPropagation();
     if (e.button !== 0) return;
     onSelect(el.id);
-    if (el.locked || editingText === el.id) return;
+    // The page background stays put: clicking it selects it (to replace or crop) without dragging it off the page.
+    if (el.locked || editingText === el.id || (el.role === "background" && cropping !== el.id)) return;
     const start = { px: e.clientX, py: e.clientY, x: el.x, y: el.y, w: el.w, h: el.h, offsetX: el.crop?.offsetX ?? 0, offsetY: el.crop?.offsetY ?? 0 };
     let began = false;
     const tolerance = 5 / scale;
@@ -129,6 +132,7 @@ export function EditorCanvas(props: Props) {
           style={{ left: selected.x * scale, top: selected.y * scale, width: selected.w * scale, height: selected.h * scale }}
         >
           {!selected.locked &&
+            selected.role !== "background" &&
             cropping !== selected.id &&
             HANDLES.map((h) => (
               <span
@@ -144,7 +148,7 @@ export function EditorCanvas(props: Props) {
             ))}
           <span className="absolute -top-5 left-0 whitespace-nowrap rounded-sm bg-accent px-1 py-px text-[10px] font-medium text-white">
             {selected.name}
-            {selected.locked ? " · locked" : ""}
+            {selected.locked ? " · locked" : selected.role === "background" && cropping !== selected.id ? " · double-click to reposition" : ""}
             {cropping === selected.id ? " · drag to reposition, scroll to zoom" : ""}
           </span>
         </div>
@@ -177,7 +181,10 @@ export function EditorCanvas(props: Props) {
         onElementDoubleClick={(el) => {
           if (el.locked) return;
           if (el.kind === "text" && !el.dynamic) setEditingText(el.id);
-          if (el.kind === "image" && el.role !== "ad") setCropping(el.id);
+          if (el.kind === "image" && el.role !== "ad") {
+            if (el.assetId) setCropping(el.id);
+            else onPlaceImage(el.id);
+          }
         }}
         overlay={overlay}
         className="bg-white shadow-page"
@@ -214,7 +221,8 @@ function InlineTextEditor({ el, profile, scale, onCommit, onCancel }: { el: Page
         fontSize: Math.max(11, size),
         lineHeight: 1.35,
         fontWeight: css.fontWeight,
-        color: css.color,
+        // The editor box is white, so frame colours (e.g. white cover type) would be invisible.
+        color: profile.colors.ink,
         zIndex: 30,
       }}
       aria-label={`Edit ${el.name}`}

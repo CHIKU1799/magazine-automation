@@ -3,7 +3,7 @@
 import * as React from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { BadgeCheck, CircleAlert, FileSearch, Layers, LibraryBig, PanelsTopLeft, RefreshCw, ScanSearch, Shapes, Sparkles, TriangleAlert, Wand2 } from "lucide-react";
+import { BadgeCheck, CircleAlert, FileSearch, Layers, LibraryBig, PanelsTopLeft, PencilRuler, RefreshCw, ScanSearch, Shapes, Sparkles, TriangleAlert, Wand2 } from "lucide-react";
 import { toast } from "sonner";
 import { useWorkspace } from "@/lib/store/workspace";
 import { Button } from "@/components/ui/button";
@@ -20,7 +20,8 @@ import { assetMap, buildToc, renderContext } from "@/lib/magazine/context";
 import { referenceStatus } from "@/lib/domain/status";
 import type { PageType, ReferencePage, Template } from "@/lib/domain/types";
 import { useApiStatus } from "@/lib/api/use-api-status";
-import { live } from "@/lib/api/live";
+import { live, waitForJob } from "@/lib/api/live";
+import { loadLists } from "@/lib/api/live-sync";
 import { cn } from "@/lib/utils/cn";
 import { formatBytes, formatDate, formatDateTime } from "@/lib/utils/format";
 
@@ -43,6 +44,7 @@ export default function ReferenceDetailPage() {
   const api = useApiStatus();
   const [filter, setFilter] = React.useState<"all" | PageType | "low">("all");
   const [inspecting, setInspecting] = React.useState<ReferencePage | null>(null);
+  const [copying, setCopying] = React.useState(false);
   const pages = React.useMemo(() => allPages.filter((p) => p.referenceId === referenceId).sort((a, b) => a.pageNumber - b.pageNumber), [allPages, referenceId]);
   const apiLive = mode === "live" && api.online;
 
@@ -88,6 +90,26 @@ export default function ReferenceDetailPage() {
     toast.success(`Template reconstructed from p.${page.pageNumber}`, { description: `${t.slots.length} frames · ${t.columns}-column text`, action: view });
   };
 
+  // A new project whose pages reproduce this PDF as editable frames; opens in the designer when ready.
+  const editCopy = async () => {
+    const id = `copy-${reference.id}`;
+    setCopying(true);
+    try {
+      const { projectId, jobId } = await live.importReference(reference.id);
+      toast.loading("Making an editable copy…", { id, description: "Reading fonts", duration: Infinity });
+      const job = await waitForJob(jobId, (j) => toast.loading("Making an editable copy…", { id, description: j.message ?? `${Math.round(j.progress ?? 0)}%`, duration: Infinity }), 2000, 60 * 60_000);
+      if (job.status !== "succeeded") throw new Error(job.error ?? job.message ?? "The copy didn't finish.");
+      await loadLists();
+      useWorkspace.getState().setActiveProject(projectId);
+      toast.success("Editable copy ready", { id, description: `${reference.pageCount} pages. Every text box, photo and logo can be edited.`, duration: 8000 });
+      router.push("/app/designer/editor");
+    } catch (err) {
+      toast.error("Couldn't make an editable copy", { id, description: (err as Error).message, duration: 10000 });
+    } finally {
+      setCopying(false);
+    }
+  };
+
   return (
     <div className="mx-auto max-w-[1440px] px-6 py-7">
       <PageHeader
@@ -107,6 +129,11 @@ export default function ReferenceDetailPage() {
         actions={
           profile && (
             <>
+              {reference.hasSourcePdf && (
+                <Button variant="primary" loading={copying} disabled={!apiLive} title={apiLive ? "Copy every page into a new project where each text box, photo and logo can be edited" : "Needs the PressFlow API"} onClick={editCopy}>
+                  <PencilRuler /> Edit as a design
+                </Button>
+              )}
               {usedBy.length > 0 && (
                 <Button
                   variant="secondary"

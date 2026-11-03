@@ -273,6 +273,7 @@ export function buildElements(tpl: AnyTemplate, profile: DesignProfile, pageNumb
 
   if (tpl.kind === "reference" || (tpl.kind === "spec" && tpl.spec.folio !== false)) {
     elements.push(folioElement(profile, pageNumber, elements.length));
+    if (pageType !== "cover") elements.push(...houseStyleElements(profile, pageNumber, elements));
   }
   if (content.adAssetId && !elements.some((e) => e.role === "ad")) {
     // Reference templates may not have an ad slot; never drop a booked ad silently.
@@ -303,6 +304,47 @@ export function folioElement(profile: DesignProfile, pageNumber: number, z: numb
     style: { align: center ? "center" : la.recto ? "right" : "left" },
     locked: true,
   };
+}
+
+const HAIRLINE = 0.75;
+
+/**
+ * The reference's recurring chrome for this page's side (corner tabs, header and footer rules and bars) plus rules
+ * between the columns of body text when the reference draws them. Locked, and under the content. Furniture touching
+ * a trim edge runs into the bleed. Mirrors page_builder.house_style_elements.
+ */
+export function houseStyleElements(profile: DesignProfile, pageNumber: number, content: PageElement[]): PageElement[] {
+  const W = profile.page.widthPt;
+  const H = profile.page.heightPt;
+  const b = profile.page.bleedPt;
+  const side = pageNumber % 2 === 1 ? "recto" : "verso";
+  const out: PageElement[] = (profile.furniture ?? [])
+    .filter((f) => f.side === side)
+    .map((f, i) => {
+      const vertical = f.kind === "rule" && f.h > f.w;
+      let x = f.x * W;
+      let y = f.y * H;
+      let w = f.kind === "rule" && vertical ? HAIRLINE : Math.max(f.w * W, HAIRLINE);
+      let h = f.kind === "rule" && !vertical ? HAIRLINE : Math.max(f.h * H, HAIRLINE);
+      if (f.x <= 0.005) [x, w] = [x - b, w + b];
+      if (f.x + f.w >= 0.995) w += b;
+      if (f.y <= 0.005) [y, h] = [y - b, h + b];
+      if (f.y + f.h >= 0.995) h += b;
+      return { id: `el_furn${i + 1}`, kind: f.kind, role: f.kind === "rule" ? "rule" : "accent_bar", name: f.kind === "rule" ? "Furniture rule" : "Furniture", x: round(x), y: round(y), w: round(w), h: round(h), z: -50 + i, fill: f.fill ?? profile.colors.rule, locked: true };
+    });
+  if (profile.grid.columnRules) {
+    content
+      .filter((e) => e.kind === "text" && e.styleRole === "body" && !e.dynamic && (e.columns ?? 1) > 1)
+      .forEach((e, k) => {
+        const cols = e.columns!;
+        const gutter = e.gutter ?? profile.grid.gutterPt;
+        const colW = (e.w - gutter * (cols - 1)) / cols;
+        for (let c = 1; c < cols; c++) {
+          out.push({ id: `el_colrule${k + 1}_${c}`, kind: "rule", role: "rule", name: "Column rule", x: round(e.x + c * colW + (c - 0.5) * gutter - HAIRLINE / 2), y: e.y, w: HAIRLINE, h: e.h, z: e.z, fill: profile.colors.rule, locked: true });
+        }
+      });
+  }
+  return out;
 }
 
 const round = (n: number) => Math.round(n * 100) / 100;

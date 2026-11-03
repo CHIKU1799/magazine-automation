@@ -23,6 +23,8 @@ dependencies = [
   "cryptography>=43",
   "jsonschema>=4.23",
   "anthropic>=0.70",
+  "truststore>=0.10",
+  "fonttools>=4.50",
 ]
 
 [project.optional-dependencies]

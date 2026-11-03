@@ -12,6 +12,7 @@ import { Topbar } from "./topbar";
 import { CommandPalette } from "./command-palette";
 import { NAV } from "./nav";
 import { useLiveSync } from "@/lib/api/live-sync";
+import { ProjectFonts } from "@/components/magazine/project-fonts";
 
 const isTyping = (target: EventTarget | null) =>
   target instanceof HTMLElement && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName));
@@ -21,6 +22,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const hydrated = useWorkspace((s) => s.hasHydrated);
   const mode = useWorkspace((s) => s.mode);
+  const activeProjectId = useWorkspace((s) => s.activeProjectId);
   const [paletteOpen, setPaletteOpen] = React.useState(false);
   const [shortcutsOpen, setShortcutsOpen] = React.useState(false);
   const [navOpen, setNavOpen] = React.useState(false);
@@ -72,6 +74,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="flex h-dvh overflow-hidden bg-canvas">
+      <ProjectFonts projectId={activeProjectId} />
       <div className="hidden lg:flex">
         <Sidebar />
       </div>

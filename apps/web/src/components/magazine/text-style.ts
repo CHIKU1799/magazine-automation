@@ -25,8 +25,9 @@ export function effectiveStyle(profile: DesignProfile, el: PageElement): TextSty
 export function textCss(profile: DesignProfile, el: PageElement): React.CSSProperties {
   const s = effectiveStyle(profile, el);
   const role = el.styleRole ?? "body";
+  const own = el.style?.fontFamily;
   return {
-    fontFamily: fontStack(s.previewFont, s.classification),
+    fontFamily: own ? `"${own}", ${fontStack(s.previewFont, s.classification)}` : fontStack(s.previewFont, s.classification),
     fontSize: s.size,
     lineHeight: `${s.leading}px`,
     fontWeight: s.weight,
@@ -35,11 +36,34 @@ export function textCss(profile: DesignProfile, el: PageElement): React.CSSPrope
     textTransform: s.uppercase ? "uppercase" : undefined,
     fontStyle: s.italic ? "italic" : undefined,
     textAlign: (s.align as React.CSSProperties["textAlign"]) ?? (role === "body" ? "justify" : "left"),
-    hyphens: role === "body" ? "auto" : "manual",
+    hyphens: role === "body" && !el.literal ? "auto" : "manual",
+    whiteSpace: el.literal ? "pre-line" : undefined,
     columnCount: el.columns && el.columns > 1 ? el.columns : undefined,
     columnGap: el.columns && el.columns > 1 ? el.gutter ?? profile.grid.gutterPt : undefined,
-    ["--pf-indent" as string]: role === "body" ? "0.9em" : "0",
+    ["--pf-indent" as string]: role === "body" && !el.literal ? "0.9em" : "0",
   };
+}
+
+/**
+ * Shrink a frame's type until it fits, matching the PDF renderer's `shrink_to_fit`
+ * for headlines. Sizes are written to the node; it never grows type past `size`.
+ */
+export function shrinkToFit(node: HTMLElement, size: number, leading: number): void {
+  const apply = (f: number) => {
+    node.style.fontSize = `${size * f}px`;
+    node.style.lineHeight = `${leading * f}px`;
+  };
+  apply(1);
+  if (!isOverset(node)) return;
+  let lo = 0.1;
+  let hi = 1;
+  for (let i = 0; i < 10; i++) {
+    const mid = (lo + hi) / 2;
+    apply(mid);
+    if (isOverset(node)) hi = mid;
+    else lo = mid;
+  }
+  apply(lo);
 }
 
 /**

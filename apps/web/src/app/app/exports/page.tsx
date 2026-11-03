@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { BookOpenCheck, CircleAlert, CircleCheck, Download, FileArchive, FileJson, FileText, Images, Loader2, NotebookPen, PackageCheck, Printer, ShieldCheck, TriangleAlert } from "lucide-react";
+import { BookOpenCheck, CircleAlert, CircleCheck, Download, FileArchive, FileJson, FileText, Images, Loader2, NotebookPen, PackageCheck, PackageOpen, Printer, ShieldCheck, TriangleAlert } from "lucide-react";
 import { toast } from "sonner";
 import { useWorkspace } from "@/lib/store/workspace";
 import { useProjectData } from "@/lib/store/hooks";
@@ -24,6 +24,7 @@ const ICONS: Record<ExportFormat, React.ReactNode> = {
   pdf_digital: <FileText />,
   pdf_print: <Printer />,
   indd: <BookOpenCheck />,
+  idml: <PackageOpen />,
   page_previews: <Images />,
   content_package: <NotebookPen />,
   asset_archive: <FileArchive />,
@@ -75,16 +76,23 @@ export default function ExportsPage() {
 
   const exportData: ExportData = { project, profile, pages, articles, assets: data.assets, speakers: data.speakers, segments: data.segments };
 
-  const availability = (f: ExportFormat): { renderer: ExportRenderer; available: boolean; reason?: string } => {
+  const availability = (f: ExportFormat): { renderer: ExportRenderer; available: boolean; reason?: string; label?: string } => {
     switch (f) {
       case "pdf_digital":
-        return apiLive ? { renderer: "reportlab", available: true } : { renderer: "browser", available: true };
+        if (apiLive) return { renderer: "reportlab", available: true };
+        // A live workspace's pages live in the API, so the browser print view has nothing to fall back on.
+        if (mode === "live") return { renderer: "reportlab", available: false, reason: api.checking ? "Checking the PressFlow API…" : "The PressFlow API isn't reachable. Start it, then reload this page." };
+        return { renderer: "browser", available: true };
       case "pdf_print":
         if (!apiLive) return { renderer: "reportlab", available: false, reason: "Needs the PressFlow API (ReportLab renderer with bleed and crop marks) or the InDesign bridge for PDF/X-4." };
         return { renderer: bridgeOnline ? "indesign" : "reportlab", available: !blocked, reason: blocked ? "Complete the approval checklist first." : undefined };
       case "indd":
         if (!bridgeOnline) return { renderer: "indesign", available: false, reason: apiLive ? "No InDesign bridge is connected. Native .indd files are only produced by Adobe InDesign." : "Needs the PressFlow API and a connected InDesign bridge. Native .indd files are only produced by Adobe InDesign." };
         return { renderer: "indesign", available: !blocked, reason: blocked ? "Complete the approval checklist first." : undefined };
+      case "idml":
+        // Written by the API itself (no InDesign needed to produce it), so it's open to drafts as well.
+        if (!apiLive) return { renderer: "reportlab", label: "API · IDML", available: false, reason: "Needs the PressFlow API." };
+        return { renderer: "reportlab", label: "API · IDML", available: true };
       case "page_previews":
       case "asset_archive":
         return { renderer: apiLive ? "reportlab" : "browser", available: true };
@@ -189,7 +197,7 @@ export default function ExportsPage() {
                   </div>
                 </div>
                 <div className="mt-4 flex items-center gap-2">
-                  <Badge tone={a.available ? "accent" : "neutral"}>{RENDERER_LABEL[a.renderer]}</Badge>
+                  <Badge tone={a.available ? "accent" : "neutral"}>{a.label ?? RENDERER_LABEL[a.renderer]}</Badge>
                   {!a.available && <Badge tone="warning">Unavailable</Badge>}
                   <Tooltip content={a.reason ?? `Generate ${info.label.toLowerCase()}`}>
                     <span className="ml-auto">

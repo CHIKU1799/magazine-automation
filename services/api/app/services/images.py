@@ -27,13 +27,37 @@ class ImageGenError(Exception):
         self.status = status
 
 
+def _endpoint() -> tuple[str, str]:
+    s = get_settings()
+    return (s.image_api_key or s.openai_api_key), (s.image_base_url or s.openai_base_url).rstrip("/")
+
+
 def configured() -> tuple[bool, str]:
     s = get_settings()
     if s.image_provider == "none":
         return False, "IMAGE_PROVIDER=none: AI image generation is switched off."
-    if not s.openai_api_key:
-        return False, "AI images need OPENAI_API_KEY (OpenAI-compatible /images/generations)."
-    return True, f"{s.image_model} via {s.openai_base_url}"
+    key, base = _endpoint()
+    if not key:
+        return False, "AI images need IMAGE_API_KEY or OPENAI_API_KEY (OpenAI-compatible /images/generations)."
+    return True, f"{s.image_model} via {base}"
+
+
+def _error(r: httpx.Response) -> ImageGenError:
+    try:
+        msg = r.json().get("error", {}).get("message") or r.text[:300]
+    except ValueError:
+        msg = r.text[:300]
+    # 400 is usually the provider's content policy or a bad parameter: the editor can rephrase.
+    return ImageGenError(f"The image service refused the request: {msg}", status=422 if r.status_code == 400 else 502)
+
+
+def _image_from(r: httpx.Response) -> bytes:
+    item = (r.json().get("data") or [{}])[0]
+    if item.get("b64_json"):
+        return base64.b64decode(item["b64_json"])
+    if item.get("url"):
+        return httpx.get(item["url"], timeout=get_settings().image_timeout_seconds).content
+    raise ImageGenError("The image service returned no image.")
 
 
 def generate(prompt: str, aspect: str) -> tuple[bytes, int, int]:
@@ -45,10 +69,11 @@ def generate(prompt: str, aspect: str) -> tuple[bytes, int, int]:
     size = ASPECT_SIZES.get(aspect)
     if size is None:
         raise ImageGenError(f"aspect must be one of {', '.join(ASPECT_SIZES)}", status=422)
+    key, base = _endpoint()
     try:
         r = httpx.post(
-            f"{s.openai_base_url.rstrip('/')}/images/generations",
-            headers={"Authorization": f"Bearer {s.openai_api_key}"},
+            f"{base}/images/generations",
+            headers={"Authorization": f"Bearer {key}"},
             json={"model": s.image_model, "prompt": FRAMING + prompt.strip(), "size": size, "quality": s.image_quality,
                   "n": 1},
             timeout=s.image_timeout_seconds,
@@ -56,19 +81,8 @@ def generate(prompt: str, aspect: str) -> tuple[bytes, int, int]:
     except httpx.HTTPError as e:
         raise ImageGenError(f"Couldn't reach the image service: {e}") from e
     if r.status_code != 200:
-        try:
-            msg = r.json().get("error", {}).get("message") or r.text[:300]
-        except ValueError:
-            msg = r.text[:300]
-        # 400 is usually the provider's content policy or a bad parameter: the editor can rephrase.
-        raise ImageGenError(f"The image service refused the request: {msg}", status=422 if r.status_code == 400 else 502)
-    item = (r.json().get("data") or [{}])[0]
-    if item.get("b64_json"):
-        raw = base64.b64decode(item["b64_json"])
-    elif item.get("url"):
-        raw = httpx.get(item["url"], timeout=s.image_timeout_seconds).content
-    else:
-        raise ImageGenError("The image service returned no image.")
+        raise _error(r)
+    raw = _image_from(r)
     with Image.open(io.BytesIO(raw)) as im:
         w, h = im.size
         if im.format != "PNG":
@@ -76,3 +90,4 @@ def generate(prompt: str, aspect: str) -> tuple[bytes, int, int]:
             im.save(buf, "PNG")
             raw = buf.getvalue()
     return raw, w, h
+

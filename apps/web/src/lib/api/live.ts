@@ -19,6 +19,7 @@ import type {
   Template,
   VideoSource,
 } from "@/lib/domain/types";
+import type { AiPageEdit } from "@/lib/designer/ai-edit";
 import { apiFetch, apiUpload } from "./client";
 
 export type ImageAspect = "portrait" | "landscape" | "square";
@@ -91,6 +92,8 @@ export const live = {
   patchProfile: (id: string, patch: Partial<DesignProfile>) => apiFetch<DesignProfile>(`/design-profiles/${id}`, { method: "PATCH", json: patch }),
   approveProfile: (id: string) => apiFetch<DesignProfile>(`/design-profiles/${id}/approve`, { method: "POST" }),
   deriveTemplate: (referenceId: string, pageNumber: number) => apiFetch<Template>("/templates/derive", { method: "POST", json: { referenceId, pageNumber } }),
+  /** Starts an editable copy of the reference: a new project whose pages reproduce the PDF frame by frame. */
+  importReference: (id: string) => apiFetch<{ projectId: string; jobId: string }>(`/references/${id}/import`, { method: "POST" }),
 
   generateArticles: (projectId: string, types: string[], sessionIds: string[]) => apiFetch<JobRef>(`/projects/${projectId}/articles/generate`, { method: "POST", json: { types, sessionIds } }),
   generationJobs: (projectId: string) => apiFetch<Job[]>(`/projects/${projectId}/articles/jobs`),
@@ -101,6 +104,8 @@ export const live = {
   approveArticle: (id: string) => apiFetch<Article>(`/articles/${id}/approve`, { method: "POST" }),
   rejectArticle: (id: string, note: string) => apiFetch<Article>(`/articles/${id}/reject`, { method: "POST", json: { note } }),
 
+  /** Proposed, validated frame operations for one page; nothing is saved server-side. */
+  aiEditPage: (projectId: string, body: { page: MagazinePage; pageNumber: number; instruction: string; selectedId?: string }) => apiFetch<AiPageEdit>(`/projects/${projectId}/pages/ai-edit`, { method: "POST", json: body }),
   savePages: (projectId: string, pages: MagazinePage[]) => apiFetch<{ pages: MagazinePage[]; preservedLocked: string[] }>(`/projects/${projectId}/pages`, { method: "PUT", json: { pages } }),
   recommendPlan: (projectId: string) => apiFetch<{ pages: MagazinePage[]; rationale: string[]; engine: string }>(`/projects/${projectId}/plan/recommend`, { method: "POST" }),
 

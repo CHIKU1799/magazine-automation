@@ -101,11 +101,12 @@ def body_style(pages: list[PageData]) -> tuple[float, str, str]:
 
 
 def mark_edges(page: PageData, body_size: float) -> None:
-    """Folios / running heads: small, short text in the top or bottom 6% of the page."""
+    """Folios / running heads: small, short text in the top or bottom 6% of the page. Page numbers count at any size."""
     lim = EDGE_FRACTION * page.height
     for ln in page.lines:
         near = ln.y1 <= lim + 2 or ln.y0 >= page.height - lim - 2
-        ln.edge = near and ln.size <= body_size * 1.2 + 0.5 and len(ln.text) <= 140
+        folio = ln.text.strip().isdigit() and len(ln.text.strip()) <= 4
+        ln.edge = near and (folio or (ln.size <= body_size * 1.2 + 0.5 and len(ln.text) <= 140))
 
 
 def merge_lines(page: PageData) -> list[TextBlock]:

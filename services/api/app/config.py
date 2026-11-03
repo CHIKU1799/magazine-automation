@@ -86,6 +86,13 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
     openai_base_url: str = "https://api.openai.com/v1"
     llm_vision_reference_analysis: bool = False
+    # Reading reference page images (rebuilding flattened covers). Empty uses LLM_PROVIDER, which may not see images.
+    llm_vision_provider: Literal["", "anthropic", "openai_compatible"] = ""
+    llm_vision_model: str = ""  # empty: ANTHROPIC_MODEL / OPENAI_MODEL for the vision provider
+    # openai_compatible vision on a different endpoint than the text model (e.g. OpenAI beside Groq); empty reuses
+    # OPENAI_API_KEY / OPENAI_BASE_URL.
+    llm_vision_api_key: str = ""
+    llm_vision_base_url: str = ""
     llm_analysis_window_chars: int = 150_000
 
     # --- transcription ----------------------------------------------------
@@ -99,6 +106,10 @@ class Settings(BaseSettings):
 
     # --- AI images ----------------------------------------------------------
     image_provider: Literal["auto", "none"] = "auto"  # auto: OpenAI /images/generations when OPENAI_API_KEY is set
+    # Images on a different endpoint than the text model (e.g. OpenAI beside Groq); empty reuses OPENAI_API_KEY /
+    # OPENAI_BASE_URL.
+    image_api_key: str = ""
+    image_base_url: str = ""
     image_model: str = "gpt-image-2"
     image_quality: Literal["low", "medium", "high", "auto"] = "high"
     image_timeout_seconds: float = 240.0

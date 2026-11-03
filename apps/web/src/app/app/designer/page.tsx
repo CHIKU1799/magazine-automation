@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { DndContext, DragOverlay, KeyboardSensor, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, rectSortingStrategy, sortableKeyboardCoordinates, useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { CircleCheck, CircleDashed, Copy, FilePlus2, Lock, LockOpen, PanelsTopLeft, PencilRuler, Redo2, ShieldCheck, Sparkles, Trash2, Undo2 } from "lucide-react";
+import { CircleCheck, CircleDashed, Copy, FilePlus2, Lock, LockOpen, PanelsTopLeft, PencilRuler, Redo2, RefreshCw, ShieldCheck, Sparkles, Trash2, Undo2 } from "lucide-react";
 import { toast } from "sonner";
 import { useWorkspace } from "@/lib/store/workspace";
 import { useProjectData } from "@/lib/store/hooks";
@@ -21,7 +21,7 @@ import type { DesignStatus, MagazinePage, PageType } from "@/lib/domain/types";
 import { pageTypeLabel } from "@/lib/templates/derive";
 import { specsForPageType, templateSpecs } from "@/lib/templates/specs";
 import { recommendFlatplan, type Recommendation } from "@/lib/planner/recommend";
-import { live } from "@/lib/api/live";
+import { ensureTemplateLogos } from "@/lib/api/live-sync";
 import { cn } from "@/lib/utils/cn";
 
 const PAGE_TYPES: PageType[] = ["cover", "toc", "editorial", "event_report", "two_column_article", "interview", "photo_gallery", "speaker_profile", "infographic", "full_page_image", "advertisement"];
@@ -39,6 +39,7 @@ export default function FlatplanPage() {
   const removePage = useWorkspace((s) => s.removePage);
   const insertPage = useWorkspace((s) => s.insertPage);
   const regeneratePages = useWorkspace((s) => s.regeneratePages);
+  const reflowProject = useWorkspace((s) => s.reflowProject);
   const undo = useWorkspace((s) => s.undo);
   const redo = useWorkspace((s) => s.redo);
   const history = useWorkspace((s) => (project ? s.history[project.id] : undefined));
@@ -140,6 +141,20 @@ export default function FlatplanPage() {
           <Button variant="secondary" size="sm" onClick={() => setAdding(true)}>
             <FilePlus2 /> Add page
           </Button>
+          <Tooltip content="Re-compose unlocked pages with the design profile's current margins, grid and type">
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={!pages.length}
+              onClick={async () => {
+                if (!(await confirm({ title: "Re-flow the layout?", description: "Unlocked pages are re-composed from their templates with the current margins, grid and type, and article text re-flows across its pages. Manual frame edits on unlocked pages are replaced; locked pages are untouched. You can undo this.", confirmLabel: "Re-flow pages" }))) return;
+                const n = reflowProject(project.id);
+                toast.success(`Re-flowed ${n} unlocked page${n === 1 ? "" : "s"}`, { action: { label: "Undo", onClick: () => undo(project.id) } });
+              }}
+            >
+              <RefreshCw /> Re-flow layout
+            </Button>
+          </Tooltip>
           <Button variant="secondary" size="sm" onClick={() => setRecommendation(recommendFlatplan(project, articles, profile, adIds, pages, templates))}>
             <Sparkles /> Recommend sequence
           </Button>
@@ -216,7 +231,8 @@ export default function FlatplanPage() {
                 <Select
                   value={page.templateId}
                   disabled={page.locked}
-                  onValueChange={(id) => {
+                  onValueChange={async (id) => {
+                    await ensureTemplateLogos(project.id, templates.find((t) => t.id === id)).catch((err) => toast.error("Logos couldn't be prepared", { description: (err as Error).message }));
                     changeTemplate(page.id, id);
                     toast.success("Template applied");
                   }}
@@ -311,16 +327,8 @@ export default function FlatplanPage() {
                   variant="primary"
                   onClick={async () => {
                     if (pages.some((p) => p.locked) && !(await confirm({ title: "Replace the flatplan?", description: `${counts.locked} locked pages will be replaced too. You can undo this from the toolbar.`, confirmLabel: "Replace", tone: "danger" }))) return;
-                    // A cover rebuilt from the reference shows logo artwork cropped from it; make sure the crops exist.
                     const coverTpl = templates.find((t) => t.id === recommendation.plan.find((e) => e.pageType === "cover")?.templateId);
-                    if (useWorkspace.getState().mode === "live" && coverTpl?.slots.some((s) => s.assetTag)) {
-                      try {
-                        const logos = await live.templateLogos(project.id, coverTpl.id);
-                        useWorkspace.setState((s) => ({ assets: [...logos, ...s.assets.filter((a) => !logos.some((l) => l.id === a.id))] }));
-                      } catch (err) {
-                        toast.error("Cover logos couldn't be prepared", { description: (err as Error).message });
-                      }
-                    }
+                    await ensureTemplateLogos(project.id, coverTpl).catch((err) => toast.error("Cover logos couldn't be prepared", { description: (err as Error).message }));
                     regeneratePages(project.id, recommendation.plan);
                     setRecommendation(null);
                     toast.success(`Flatplan rebuilt with ${recommendation.plan.length} pages`, { action: { label: "Undo", onClick: () => undo(project.id) } });
@@ -360,6 +368,7 @@ function SortablePage({ page, index, selected, onSelect, onOpen, width, render }
       ref={setNodeRef}
       style={{ transform: CSS.Transform.toString(transform), transition, width }}
       className={cn("group relative select-none", isDragging && "opacity-30")}
+      title="Double-click to edit this page"
       onClick={(e) => {
         e.stopPropagation();
         onSelect();

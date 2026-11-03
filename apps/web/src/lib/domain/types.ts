@@ -357,7 +357,7 @@ export interface LayoutBlock {
   color?: string;
   sample?: string;
   /** Set by vision detection on pages stored as one flattened picture (e.g. covers). */
-  coverRole?: "masthead" | "logo" | "tagline" | "issue_line" | "headline" | "deck" | "cover_line" | "band";
+  coverRole?: "masthead" | "logo" | "tagline" | "issue_line" | "headline" | "deck" | "cover_line" | "band" | "photo";
   align?: "left" | "center" | "right";
   weight?: number;
   uppercase?: boolean;
@@ -417,7 +417,10 @@ export interface DesignProfile {
     bleedPt: number;
   };
   margins: { top: number; bottom: number; inside: number; outside: number };
-  grid: { columns: number; gutterPt: number; baselinePt: number };
+  /** columnRules: vertical rules between text columns, as in the reference. */
+  grid: { columns: number; gutterPt: number; baselinePt: number; columnRules?: boolean };
+  /** Recurring page chrome from the reference (corner tabs, header/footer rules and bars), normalised to the trim. */
+  furniture?: { side: "recto" | "verso"; kind: "shape" | "rule"; x: number; y: number; w: number; h: number; fill?: string | null }[];
   typography: Record<TextRole, TextStyle>;
   colors: {
     ink: string;
@@ -523,7 +526,11 @@ export interface PageElement {
   styleRole?: TextRole;
   style?: Partial<Pick<TextStyle, "size" | "leading" | "weight" | "tracking" | "color" | "uppercase" | "italic" | "previewFont">> & {
     align?: "left" | "center" | "right" | "justify";
+    /** A typeface of the frame's own, ahead of the preview font (frames copied from a reference keep its fonts). */
+    fontFamily?: string;
   };
+  /** Text set exactly as written: line breaks kept, no PressFlow markup (frames copied from a reference PDF). */
+  literal?: boolean;
   columns?: number;
   gutter?: number;
   /* image */
@@ -535,6 +542,8 @@ export interface PageElement {
   strokeWidth?: number;
   radius?: number;
   opacity?: number;
+  /** Clockwise, in degrees, about the frame's centre. */
+  rotation?: number;
 }
 
 export type EditorialStatus = "pending" | "approved";
@@ -618,6 +627,7 @@ export type ExportFormat =
   | "pdf_digital"
   | "pdf_print"
   | "indd"
+  | "idml"
   | "page_previews"
   | "content_package"
   | "asset_archive"
@@ -664,7 +674,8 @@ export interface Job {
     | "reference_analysis"
     | "article_generation"
     | "export_render"
-    | "page_reanalysis";
+    | "page_reanalysis"
+    | "reference_import";
   status: JobStatus;
   progress: number;
   message?: string;

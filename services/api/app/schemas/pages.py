@@ -104,6 +104,24 @@ class PagesPutResponse(CamelModel):
     preserved_locked: list[ID] = Field(default_factory=list)
 
 
+class PageAiEditRequest(CamelModel):
+    """The page as the editor holds it (unsaved edits included) and the designer's instruction."""
+
+    page: MagazinePageIn
+    page_number: int = Field(default=1, ge=1)
+    instruction: str = Field(min_length=2, max_length=2000)
+    selected_id: ID | None = None
+
+
+class PageAiEditResponse(CamelModel):
+    summary: str
+    # Validated editor operations: {op: update|add|delete, elementId?, kind?, patch, style?, arrange?}.
+    operations: list[dict]
+    notes: list[str] = Field(default_factory=list)
+    provider: str
+    model: str
+
+
 class PlanRecommendRequest(CamelModel):
     target_page_count: int | None = Field(default=None, ge=2, le=500)
 
@@ -202,7 +220,8 @@ ExportStatus = Literal["queued", "running", "complete", "failed", "unavailable"]
 class ExportRecord(CamelModel):
     id: ID
     project_id: ID
-    format: Literal["pdf_digital", "pdf_print", "indd", "page_previews", "content_package", "asset_archive", "layout_json"]
+    format: Literal["pdf_digital", "pdf_print", "indd", "idml", "page_previews", "content_package", "asset_archive",
+                   "layout_json"]
     status: ExportStatus
     renderer: Literal["browser", "reportlab", "indesign"]
     file_name: str
@@ -215,7 +234,8 @@ class ExportRecord(CamelModel):
 
 
 class ExportCreateRequest(CamelModel):
-    format: Literal["pdf_digital", "pdf_print", "indd", "page_previews", "content_package", "asset_archive", "layout_json"]
+    format: Literal["pdf_digital", "pdf_print", "indd", "idml", "page_previews", "content_package", "asset_archive",
+                   "layout_json"]
     contract: dict | None = None
     renderer: Literal["reportlab", "indesign", "auto"] = "auto"
     force: bool = False  # render pages whose content is not approved (watermarked)
@@ -234,7 +254,8 @@ class ActivityItem(CamelModel):
     project_id: ID | None = None
 
 
-JobKind = Literal["video_pipeline", "reference_analysis", "article_generation", "export_render", "page_reanalysis"]
+JobKind = Literal["video_pipeline", "reference_analysis", "article_generation", "export_render", "page_reanalysis",
+                  "reference_import"]
 
 
 class Job(CamelModel):

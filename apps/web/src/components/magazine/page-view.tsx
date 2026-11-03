@@ -6,7 +6,7 @@ import { adCreatives } from "@/lib/demo/assets";
 import { liveArea, columnGrid } from "@/lib/templates/geometry";
 import { cn } from "@/lib/utils/cn";
 import { AdPlaceholder, PlaceholderPhoto } from "./placeholder-photo";
-import { effectiveStyle, fontStack, isOverset, textCss } from "./text-style";
+import { effectiveStyle, fontStack, isOverset, shrinkToFit, textCss } from "./text-style";
 
 export interface TocEntry {
   page: number;
@@ -115,7 +115,7 @@ interface ElementViewProps {
 }
 
 const ElementView = React.memo(function ElementView({ el, profile, assets, ctx, localUrls, showOverset, onOverset, onPointerDown, onDoubleClick }: ElementViewProps) {
-  const box: React.CSSProperties = { position: "absolute", left: el.x, top: el.y, width: el.w, height: el.h, opacity: el.opacity };
+  const box: React.CSSProperties = { position: "absolute", left: el.x, top: el.y, width: el.w, height: el.h, opacity: el.opacity, transform: el.rotation ? `rotate(${el.rotation}deg)` : undefined };
   const handlers = {
     onPointerDown: onPointerDown ? (e: React.PointerEvent) => onPointerDown(e, el) : undefined,
     onDoubleClick: onDoubleClick ? () => onDoubleClick(el) : undefined,
@@ -179,11 +179,14 @@ function TextFrame({ el, profile, ctx, box, showOverset, onOverset, handlers }: 
   const ref = React.useRef<HTMLDivElement>(null);
   const [overset, setOverset] = React.useState(false);
   const css = textCss(profile, el);
+  // Headlines shrink to fit their frame, as they do in the exported PDF (layout contract `shrink_to_fit`).
+  const fit = el.styleRole === "headline" && !(el.columns && el.columns > 1) ? effectiveStyle(profile, el) : null;
 
   React.useLayoutEffect(() => {
     const node = ref.current;
     if (!node) return;
     const measure = () => {
+      if (fit) shrinkToFit(node, fit.size, fit.leading);
       const over = isOverset(node, el.columns);
       setOverset((prev) => (prev === over ? prev : over));
       onOverset?.(el.id, over);
@@ -219,6 +222,23 @@ function Paragraphs({ el, profile }: { el: PageElement; profile: DesignProfile }
   const t = profile.typography;
   const paras = text.split(/\n{2,}/);
   const base = effectiveStyle(profile, el);
+  if (el.literal) {
+    // Copied text keeps the PDF's line breaks; justified, every line but a paragraph's last fills the measure.
+    if (el.style?.align !== "justify") return <>{paras.map((p, i) => <p key={i}>{p}</p>)}</>;
+    return (
+      <>
+        {paras.map((p, i) => (
+          <p key={i}>
+            {p.split("\n").map((line, j, all) => (
+              <span key={j} style={{ display: "block", textAlignLast: j < all.length - 1 ? "justify" : undefined }}>
+                {line}
+              </span>
+            ))}
+          </p>
+        ))}
+      </>
+    );
+  }
 
   if (role === "pullquote") {
     const style = profile.pullQuote.style;

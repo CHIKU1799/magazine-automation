@@ -43,7 +43,7 @@ class LayoutBlock(CamelModel):
     color: str | None = None
     sample: str | None = None
     # Set by vision detection on pages that are one flattened image (e.g. covers):
-    # masthead | logo | tagline | issue_line | headline | deck | cover_line | band
+    # masthead | logo | tagline | issue_line | headline | deck | cover_line | band | photo
     cover_role: str | None = None
     align: Literal["left", "center", "right"] | None = None
     weight: int | None = None
@@ -112,6 +112,19 @@ class Grid(CamelModel):
     columns: int
     gutter_pt: float
     baseline_pt: float
+    column_rules: bool = False  # vertical rules between text columns, as in the reference
+
+
+class FurnitureItem(CamelModel):
+    """Recurring page chrome (corner tabs, header/footer rules and bars), normalised to the trim."""
+
+    side: Literal["recto", "verso"]
+    kind: Literal["shape", "rule"]
+    x: float
+    y: float
+    w: float
+    h: float
+    fill: str | None = None
 
 
 class Colors(CamelModel):
@@ -155,6 +168,7 @@ class DesignProfile(CamelModel):
     images: Images
     pull_quote: PullQuote
     page_type_counts: dict[PageType, int]
+    furniture: list[FurnitureItem] = Field(default_factory=list)
     confidence: dict[str, float]
     overrides: list[str]
     approved_at: ISODate | None = None
@@ -183,6 +197,13 @@ class ReferenceUploadResponse(CamelModel):
 class AnalyseResponse(CamelModel):
     job_id: ID
     reference: ReferenceMagazine
+
+
+class ReferenceImportResponse(CamelModel):
+    """The new project that will hold the editable copy, and the job filling it."""
+
+    project_id: ID
+    job_id: ID
 
 
 class TemplateSlot(CamelModel):

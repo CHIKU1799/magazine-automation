@@ -3,7 +3,7 @@
 import * as React from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { BookOpen, ChevronLeft, ChevronRight, Columns2, Download, Eye, Frame, Grid3x3, Image as ImageIcon, Layers, LayoutTemplate, Lock, PanelsTopLeft, Redo2, Save, Undo2, ZoomIn, ZoomOut } from "lucide-react";
+import { BookOpen, ChevronLeft, ChevronRight, Columns2, Download, Eye, Frame, Grid3x3, Image as ImageIcon, ImagePlus, Layers, LayoutTemplate, Lock, PanelLeft, PackageOpen, PanelsTopLeft, Redo2, Save, Sparkles, Square, Trash2, Type, Undo2, ZoomIn, ZoomOut } from "lucide-react";
 import { toast } from "sonner";
 import { useWorkspace } from "@/lib/store/workspace";
 import { useProjectData } from "@/lib/store/hooks";
@@ -15,6 +15,8 @@ import { Field, Textarea } from "@/components/ui/input";
 import { EditorCanvas } from "@/components/designer/editor-canvas";
 import { AssetPicker, ElementPanel, LayersList, fitTextInDom } from "@/components/designer/editor-panels";
 import { MagazineReader } from "@/components/designer/magazine-reader";
+import { AiEditDialog } from "@/components/designer/ai-edit-dialog";
+import { applyAiOperations } from "@/lib/designer/ai-edit";
 import { PageThumb } from "@/components/magazine/page-thumb";
 import { PageView } from "@/components/magazine/page-view";
 import { TemplatePreview } from "@/components/designer/template-preview";
@@ -22,7 +24,9 @@ import { designStatus } from "@/lib/domain/status";
 import type { Asset, DesignStatus, PageElement } from "@/lib/domain/types";
 import { specsForPageType } from "@/lib/templates/specs";
 import { pageTypeLabel } from "@/lib/templates/derive";
+import { liveArea } from "@/lib/templates/geometry";
 import { live } from "@/lib/api/live";
+import { ensureTemplateLogos } from "@/lib/api/live-sync";
 import { AddImages, aspectFor } from "@/components/media/add-images";
 import { useApiStatus } from "@/lib/api/use-api-status";
 import { uid } from "@/lib/utils/format";
@@ -57,11 +61,19 @@ function Editor() {
   const [editingText, setEditingText] = React.useState<string | null>(null);
   const [cropping, setCropping] = React.useState<string | null>(null);
   const [overset, setOverset] = React.useState<Record<string, boolean>>({});
-  const [picker, setPicker] = React.useState<null | "replace" | "add">(null);
+  const [picker, setPicker] = React.useState<null | "replace" | "add" | "background">(null);
   const [reader, setReader] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
+  const [exportingIdml, setExportingIdml] = React.useState(false);
+  const [leftOpen, setLeftOpen] = React.useState(true);
+  const [aiOpen, setAiOpen] = React.useState(false);
   const stage = React.useRef<HTMLDivElement>(null);
   const [stageSize, setStageSize] = React.useState({ w: 900, h: 700 });
+
+  // On narrower windows the page needs the room; the panel stays one click away in the toolbar.
+  React.useEffect(() => {
+    if (window.innerWidth < 1280) setLeftOpen(false);
+  }, []);
 
   React.useEffect(() => {
     const el = stage.current;
@@ -184,17 +196,91 @@ function Editor() {
       ? `Striking cover image for "${data.project?.title ?? "the magazine"}", about ${data.project?.eventName ?? "the event"}. Leave calm space in the upper third for the masthead and cover lines.`
       : "";
   const imageAspect = selected?.kind === "image" ? aspectFor(selected.w, selected.h) : page.pageType === "cover" || page.pageType === "full_page_image" ? "portrait" : "landscape";
+  const nextZ = () => Math.max(0, ...page.elements.map((e) => e.z)) + 1;
   const placeAsset = (a: Asset) => {
-    if (selected?.kind === "image" && !selected.locked) {
-      updateElement(page.id, selected.id, { assetId: a.id, crop: { scale: 1, offsetX: 0, offsetY: 0 } });
-      toast.success("Image replaced");
+    if (selected && selected.id === background?.id) {
+      placeBackground(a);
+    } else if (selected?.kind === "image" && !selected.locked) {
+      change(selected.id, { assetId: a.id, crop: { scale: 1, offsetX: 0, offsetY: 0 } }, true);
+      toast.success(selected.assetId ? "Image replaced" : "Image placed");
     } else {
       const w = profile.page.widthPt / 3;
-      const el: PageElement = { id: uid("el"), kind: "image", role: "image", name: "Image", x: (profile.page.widthPt - w) / 2, y: profile.page.heightPt / 3, w, h: w * 0.66, z: Math.max(0, ...page.elements.map((e) => e.z)) + 1, assetId: a.id, crop: { scale: 1, offsetX: 0, offsetY: 0 } };
+      const el: PageElement = { id: uid("el"), kind: "image", role: "image", name: "Image", x: (profile.page.widthPt - w) / 2, y: profile.page.heightPt / 3, w, h: w * 0.66, z: nextZ(), assetId: a.id, crop: { scale: 1, offsetX: 0, offsetY: 0 } };
       addElement(page.id, el);
       setSelectedId(el.id);
       toast.success("Image placed — drag to position");
     }
+  };
+  // The page background: a full-bleed picture under everything (frames copied from a reference have one).
+  const background = page.elements.find((e) => e.kind === "image" && e.role === "background" && e.w >= profile.page.widthPt);
+  const placeBackground = (a: Asset) => {
+    const crop = { scale: 1, offsetX: 0, offsetY: 0 };
+    if (background) {
+      change(background.id, { assetId: a.id, crop, locked: false }, true);
+    } else {
+      const b = profile.page.bleedPt;
+      addElement(page.id, { id: uid("el"), kind: "image", role: "background", name: "Background", x: -b, y: -b, w: profile.page.widthPt + 2 * b, h: profile.page.heightPt + 2 * b, z: Math.min(0, ...page.elements.map((e) => e.z)) - 1, assetId: a.id, crop });
+    }
+    toast.success(background ? "Background replaced" : "Background added", { description: "It fills the page and its bleed, under every other frame." });
+  };
+  const pick = (a: Asset) => (picker === "background" ? placeBackground(a) : placeAsset(a));
+  const aiReady = mode === "live" && api.online;
+  // The API writes the package from the saved pages, so unsaved edits are saved first.
+  const exportIdml = async () => {
+    const id = `idml-${project.id}`;
+    setExportingIdml(true);
+    try {
+      await live.savePages(project.id, pages);
+      toast.loading("Building the InDesign package…", { id, duration: Infinity });
+      const rec = await live.createExport(project.id, "idml", undefined);
+      const started = Date.now();
+      let latest = rec;
+      while (["queued", "running"].includes(latest.status) && Date.now() - started < 10 * 60_000) {
+        await new Promise((r) => setTimeout(r, 2000));
+        latest = (await live.listExports(project.id)).find((e) => e.id === rec.id) ?? latest;
+      }
+      if (latest.status !== "complete") throw new Error(latest.message ?? `The export ${latest.status === "failed" ? "failed" : "didn't finish"}.`);
+      window.location.href = latest.downloadUrl ?? `/api/v1/exports/${latest.id}/download`;
+      toast.success("InDesign package downloaded", { id, description: "Unzip it, open the .idml in InDesign and choose File › Save As to get the .indd. README.txt lists the fonts it uses.", duration: 12000 });
+    } catch (err) {
+      toast.error("Couldn't build the InDesign package", { id, description: (err as Error).message });
+    } finally {
+      setExportingIdml(false);
+    }
+  };
+  // The page as it stands (unsaved edits included) goes to the API; the validated operations come back as one undo step.
+  const runAiEdit = async (instruction: string): Promise<boolean> => {
+    try {
+      const res = await live.aiEditPage(project.id, { page, pageNumber: index + 1, instruction, selectedId: selected?.id });
+      const current = useWorkspace.getState().pages.find((p) => p.id === page.id) ?? page;
+      const { elements, changed } = applyAiOperations(current.elements, res.operations, profile, index + 1);
+      const notes = res.notes.join(" ");
+      if (!changed) {
+        toast.info(res.summary || "No changes were needed.", { description: notes || undefined });
+        return true;
+      }
+      updatePage(page.id, { elements, designStatus: page.designStatus === "not_started" ? "in_progress" : page.designStatus });
+      if (selectedId && !elements.some((e) => e.id === selectedId)) setSelectedId(null);
+      toast.success(res.summary || `Applied ${changed} change${changed === 1 ? "" : "s"}`, { description: notes || undefined, duration: 8000, action: { label: "Undo", onClick: () => undo(project.id) } });
+      return true;
+    } catch (err) {
+      toast.error("Edit with AI failed", { description: (err as Error).message });
+      return false;
+    }
+  };
+  // New frames start centred in the live area, on top of everything else.
+  const insertFrame = (kind: "text" | "shape") => {
+    const la = liveArea(profile, index + 1);
+    const w = kind === "text" ? Math.round(la.w / 2) : 120;
+    const h = kind === "text" ? 96 : 80;
+    const at = { x: Math.round(la.x + (la.w - w) / 2), y: Math.round(la.y + (la.h - h) / 2), w, h, z: nextZ() };
+    const el: PageElement =
+      kind === "text"
+        ? { id: uid("el"), kind: "text", role: "body", styleRole: "body", name: "Text frame", text: "Type your text here.", ...at }
+        : { id: uid("el"), kind: "shape", role: "accent_bar", name: "Shape", fill: profile.colors.accent, ...at };
+    addElement(page.id, el);
+    setSelectedId(el.id);
+    if (kind === "text") setEditingText(el.id);
   };
 
   return (
@@ -208,6 +294,7 @@ function Editor() {
             </Link>
           </Button>
         </Tooltip>
+        <Toggle on={leftOpen} onClick={() => setLeftOpen((v) => !v)} label="Pages, layers, templates & photos" icon={<PanelLeft />} />
         <div className="mx-1 h-5 w-px bg-line" />
         <Button variant="ghost" size="icon-sm" disabled={index <= 0} onClick={() => go(index - 1)} aria-label="Previous page">
           <ChevronLeft />
@@ -229,6 +316,22 @@ function Editor() {
         <Tooltip content="Redo" shortcut="⇧⌘Z">
           <Button variant="ghost" size="icon-sm" disabled={!history?.future.length} onClick={() => redo(project.id)} aria-label="Redo">
             <Redo2 />
+          </Button>
+        </Tooltip>
+        <div className="mx-1 h-5 w-px bg-line" />
+        <Tooltip content="Add a text frame">
+          <Button variant="ghost" size="sm" disabled={page.locked} onClick={() => insertFrame("text")}>
+            <Type /> <span className="hidden xl:inline">Text</span>
+          </Button>
+        </Tooltip>
+        <Tooltip content={selected?.kind === "image" && !selected.locked ? "Place a photo in the selected frame" : "Add a photo — upload, generate or pick from the library"}>
+          <Button variant="ghost" size="sm" disabled={page.locked} onClick={() => setPicker("add")}>
+            <ImagePlus /> <span className="hidden xl:inline">Photo</span>
+          </Button>
+        </Tooltip>
+        <Tooltip content="Add a shape">
+          <Button variant="ghost" size="sm" disabled={page.locked} onClick={() => insertFrame("shape")}>
+            <Square /> <span className="hidden xl:inline">Shape</span>
           </Button>
         </Tooltip>
         <div className="mx-1 h-5 w-px bg-line" />
@@ -258,6 +361,13 @@ function Editor() {
           <Button variant="secondary" size="sm" loading={saving} onClick={save}>
             <Save /> Save
           </Button>
+          <Tooltip content={aiReady ? "Download every page as an InDesign package (.idml + pictures): open it in InDesign and save as .indd" : "Needs the PressFlow API"}>
+            <span>
+              <Button variant="secondary" size="sm" disabled={!aiReady} loading={exportingIdml} onClick={exportIdml}>
+                <PackageOpen /> InDesign
+              </Button>
+            </span>
+          </Tooltip>
           <Button variant="primary" size="sm" asChild>
             <Link href="/app/exports">
               <Download /> Export
@@ -268,7 +378,7 @@ function Editor() {
 
       <div className="flex min-h-0 flex-1">
         {/* Left panel */}
-        <aside className="hidden w-[248px] shrink-0 flex-col border-r border-line bg-surface lg:flex">
+        <aside className={cn("w-[248px] shrink-0 flex-col border-r border-line bg-surface", leftOpen ? "flex" : "hidden")}>
           <Tabs defaultValue="pages" className="flex min-h-0 flex-1 flex-col">
             <TabsList className="px-1.5">
               <TabsTrigger value="pages" title="Pages"><BookOpen /></TabsTrigger>
@@ -301,6 +411,7 @@ function Editor() {
                     onClick={async () => {
                       if (t.id === page.templateId) return;
                       if (!(await confirm({ title: `Apply “${t.name}”?`, description: "Manual changes to frames on this page are replaced. You can undo this.", confirmLabel: "Apply template" }))) return;
+                      await ensureTemplateLogos(project.id, templates.find((x) => x.id === t.id)).catch((err) => toast.error("Logos couldn't be prepared", { description: (err as Error).message }));
                       changeTemplate(page.id, t.id);
                       setSelectedId(null);
                     }}
@@ -348,6 +459,10 @@ function Editor() {
                 setEditingText={setEditingText}
                 cropping={cropping}
                 setCropping={setCropping}
+                onPlaceImage={(id) => {
+                  setSelectedId(id);
+                  setPicker("replace");
+                }}
               />
               {facing && facingIndex > index && (
                 <div className="pointer-events-none opacity-80">
@@ -357,12 +472,21 @@ function Editor() {
             </div>
           </div>
           <p className="pointer-events-none absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full bg-surface/90 px-3 py-1 text-[11px] text-ink-3 shadow-sm">
-            HTML preview renderer · final INDD and print PDF are produced by Adobe InDesign
+            HTML preview · “InDesign” downloads an .idml package to open in InDesign and save as .indd
           </p>
         </div>
 
         {/* Right panel */}
         <aside className="scroll-thin hidden w-[300px] shrink-0 overflow-y-auto border-l border-line bg-surface md:block">
+          <div className="border-b border-line p-3">
+            <Tooltip content={!aiReady ? "Needs the PressFlow API with an AI provider" : page.locked ? "Unlock the page to edit it" : selected ? `Describe a change to “${selected.name}” or the page` : "Describe a change to this page in plain words"}>
+              <span className="block">
+                <Button variant="primary" size="sm" className="w-full" disabled={!aiReady || page.locked} onClick={() => setAiOpen(true)}>
+                  <Sparkles /> Edit with AI
+                </Button>
+              </span>
+            </Tooltip>
+          </div>
           {selected ? (
             <ElementPanel
               el={selected}
@@ -411,12 +535,57 @@ function Editor() {
                   </Button>
                 </div>
               )}
+              <div>
+                <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-4">Add to page</p>
+                <div className="grid grid-cols-3 gap-1.5">
+                  {(
+                    [
+                      ["Text", <Type key="t" />, () => insertFrame("text")],
+                      ["Photo", <ImagePlus key="p" />, () => setPicker("add")],
+                      ["Shape", <Square key="s" />, () => insertFrame("shape")],
+                    ] as const
+                  ).map(([label, icon, onClick]) => (
+                    <button
+                      key={label}
+                      disabled={page.locked}
+                      onClick={onClick}
+                      className="flex flex-col items-center gap-1 rounded-md border border-line py-2.5 text-xs text-ink-2 transition-colors hover:border-line-strong hover:bg-hover disabled:opacity-50 [&_svg]:size-4 [&_svg]:text-ink-3"
+                    >
+                      {icon}
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-4">Background</p>
+                <div className="flex items-center gap-2">
+                  {background ? (
+                    <button onClick={() => setSelectedId(background.id)} className="h-12 w-9 shrink-0 overflow-hidden rounded-sm border border-line" title="Select the background">
+                      {background.assetId && assetsById[background.assetId]?.url ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={assetsById[background.assetId]!.url} alt="" className="h-full w-full object-cover" />
+                      ) : null}
+                    </button>
+                  ) : null}
+                  <Button variant="secondary" size="sm" className="flex-1" disabled={page.locked} onClick={() => setPicker("background")}>
+                    <ImageIcon /> {background ? "Replace background" : "Add background image"}
+                  </Button>
+                  {background && (
+                    <Tooltip content="Remove the background">
+                      <Button variant="ghost" size="icon-sm" disabled={page.locked} onClick={() => removeElement(page.id, background.id)} aria-label="Remove the background">
+                        <Trash2 />
+                      </Button>
+                    </Tooltip>
+                  )}
+                </div>
+              </div>
               <Field label="Notes" optional>
                 <Textarea rows={3} value={page.notes ?? ""} onChange={(e) => updatePage(page.id, { notes: e.target.value }, { history: false })} onKeyDown={(e) => e.stopPropagation()} />
               </Field>
               <div className="rounded-md bg-subtle p-3 text-xs leading-relaxed text-ink-3">
                 <p className="font-medium text-ink-2">Editing</p>
-                Click a frame to select · drag to move (snaps to margins and columns; hold ⌥ to disable) · drag handles to resize · double-click text to edit · double-click an image to crop · arrows nudge (⇧ ×10) · ⌫ deletes.
+                Click a frame to select · drag to move (snaps to margins and columns; hold ⌥ to disable) · drag handles to resize · double-click text to edit · double-click an empty photo frame to place a photo, or a photo to crop it · arrows nudge (⇧ ×10) · ⌫ deletes.
               </div>
               <Button variant="secondary" size="sm" onClick={() => updatePage(page.id, { locked: !page.locked })}>
                 <Lock /> {page.locked ? "Unlock page" : "Lock page"}
@@ -427,32 +596,36 @@ function Editor() {
       </div>
 
       <Dialog open={picker !== null} onOpenChange={(o) => !o && setPicker(null)}>
-        <DialogContent title="Choose a photograph" size="lg">
+        <DialogContent
+          title={picker === "background" ? (background ? "Replace the background" : "Add a background") : selected?.kind === "image" && !selected.locked ? (selected.assetId ? "Replace photograph" : "Place a photograph") : "Add a photograph"}
+          description={picker === "background" ? "The picture fills the whole page and its bleed, under every other frame. Upload one, generate one with AI, or pick from this project's library." : "Upload your own, generate one with AI, or pick from this project's library."}
+          size="lg"
+        >
           <div className="mb-3">
             <AddImages
               projectId={page.projectId}
               defaultPrompt={imagePrompt}
-              defaultAspect={imageAspect}
+              defaultAspect={picker === "background" ? "portrait" : imageAspect}
               sessionId={article?.sessionIds?.[0]}
               onAdded={(a) => {
-                if (selected) change(selected.id, { assetId: a.id, crop: { scale: 1, offsetX: 0, offsetY: 0 } }, true);
+                pick(a);
                 setPicker(null);
               }}
             />
           </div>
           <AssetPicker
             assets={data.assets}
-            sessionHint={article?.sessionIds}
+            sessionHint={picker === "background" ? undefined : article?.sessionIds}
             onPick={(a) => {
-              if (selected) change(selected.id, { assetId: a.id, crop: { scale: 1, offsetX: 0, offsetY: 0 } }, true);
+              pick(a);
               setPicker(null);
-              toast.success("Image replaced");
             }}
           />
         </DialogContent>
       </Dialog>
 
       <MagazineReader open={reader} onOpenChange={setReader} startIndex={index} />
+      <AiEditDialog open={aiOpen} onOpenChange={setAiOpen} selectedName={selected?.name} onRun={runAiEdit} />
     </div>
   );
 }

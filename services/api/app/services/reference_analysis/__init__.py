@@ -8,7 +8,7 @@ aware) -> grid/gutter/baseline -> typography hierarchy -> palette -> DesignProfi
 from __future__ import annotations
 
 import logging
-from collections import Counter
+from collections import Counter, defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from statistics import median
@@ -232,8 +232,67 @@ def _analyse_pages(pages: list[PageData], title: str | None, bleed: float | None
             },
             "features": {**features[p.index].as_dict(), "scores": scores[p.index]},
         })
+    furniture, column_rules = house_style(out_pages)
+    profile["furniture"] = furniture
+    profile["grid"]["columnRules"] = column_rules
     progress(90, "Built page layouts")
     return AnalysisResult(page_count=n, title=title, profile=profile, pages=out_pages, notes=notes)
+
+
+NO_FURNITURE = ("cover", "advertisement", "full_page_image", "toc")
+ARTICLE_TYPES = ("two_column_article", "event_report", "interview", "editorial")
+
+
+def _column_rule(b: dict) -> bool:
+    return b["kind"] == "rule" and b["w"] < 0.005 and b["h"] > 0.25 and 0.15 < b["x"] < 0.85
+
+
+def house_style(pages: list[dict]) -> tuple[list[dict], bool]:
+    """Page furniture and column rules: the reference's recurring chrome, reapplied to every composed page.
+
+    Furniture is a shape or rule at the same place (to 0.01 of the page) on at least 35% of the content pages of one
+    side, recorded per side because spreads mirror it. A rule running from a page edge counts by that edge, since its
+    length often follows a running head; its median length is kept. Column rules are on when most article pages draw a
+    vertical rule between text columns. Boxes are normalised to the trim; fills are the most common colour seen there.
+    """
+    content = [p for p in pages if p["layoutType"] not in NO_FURNITURE]
+    furniture: list[dict] = []
+    for side, parity in (("recto", 1), ("verso", 0)):
+        group = [p for p in content if p["pageNumber"] % 2 == parity]
+        if len(group) < 4:
+            continue
+        seen: dict[tuple, list[tuple[tuple[float, float, float, float], str | None]]] = defaultdict(list)
+        for p in group:
+            on_page: dict[tuple, tuple[tuple[float, float, float, float], str | None]] = {}
+            for b in p["blocks"]:
+                if b["kind"] not in ("shape", "rule"):
+                    continue
+                x, y, w, h = b["x"], b["y"], b["w"], b["h"]
+                if x < -0.01 or y < -0.01 or x + w > 1.01 or y + h > 1.01:
+                    continue  # the facing page's share of a spread element
+                if b["kind"] == "shape" and (w < 0.004 or h < 0.004 or w * h > 0.12 or w * h < 0.0005):
+                    continue  # hairline slivers, icon specks and backgrounds
+                if b["kind"] == "rule" and (max(w, h) < 0.02 or _column_rule(b)):
+                    continue
+                key: tuple = (b["kind"], round(x, 2), round(y, 2), round(w, 2), round(h, 2))
+                if b["kind"] == "rule" and w >= h and (x <= 0.01 or x + w >= 0.99):
+                    key = ("rule", "h", round(y, 2), "left" if x <= 0.01 else "right")
+                elif b["kind"] == "rule" and h > w and (y <= 0.01 or y + h >= 0.99):
+                    key = ("rule", "v", round(x, 2), "top" if y <= 0.01 else "bottom")
+                on_page.setdefault(key, ((x, y, w, h), b.get("color")))
+            for key, seen_here in on_page.items():
+                seen[key].append(seen_here)
+        need = max(3, 0.35 * len(group))
+        for key, hits in seen.items():
+            if len(hits) < need:
+                continue
+            x, y, w, h = (round(float(median(box[i] for box, _ in hits)), 3) for i in range(4))
+            fill = Counter(c for _, c in hits if c).most_common(1)
+            furniture.append({"side": side, "kind": key[0], "x": x, "y": y, "w": w, "h": h,
+                              "fill": fill[0][0] if fill else None})
+    articles = [p for p in pages if p["layoutType"] in ARTICLE_TYPES]
+    ruled = sum(1 for p in articles if any(_column_rule(b) for b in p["blocks"]))
+    return furniture, bool(articles) and ruled / len(articles) >= 0.4
 
 
 def _visual_columns(p: PageData) -> int:

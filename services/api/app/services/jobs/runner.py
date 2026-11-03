@@ -19,6 +19,7 @@ def load_handlers() -> None:
     from app.services import (  # noqa: F401
         editorial,
         exports,
+        reference_import,
         reference_jobs,
         video_pipeline,
     )

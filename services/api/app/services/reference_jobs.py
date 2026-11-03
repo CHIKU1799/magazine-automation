@@ -12,7 +12,7 @@ from app.ids import new_id, utcnow
 from app.models import DesignProfile, Project, ReferenceMagazine, ReferencePage
 from app.schemas.base import PAGE_TYPES
 from app.services.jobs.queue import JobContext, PermanentError, RetryableError, register
-from app.services.llm import LLMError, get_llm, nullable, strict_object
+from app.services.llm import LLMError, get_vision_llm, nullable, strict_object
 from app.services.reference_analysis import AnalysisResult, analyse_pdf, render_page_png
 from app.services.storage import get_storage
 
@@ -25,7 +25,7 @@ VISION_SCHEMA = strict_object({
 })
 
 
-COVER_ROLES = ["masthead", "logo", "tagline", "issue_line", "headline", "deck", "cover_line", "band"]
+COVER_ROLES = ["masthead", "logo", "tagline", "issue_line", "headline", "deck", "cover_line", "band", "photo"]
 COVER_VISION_SCHEMA = strict_object({
     "elements": {"type": "array", "items": strict_object({
         "role": {"type": "string", "enum": COVER_ROLES},
@@ -50,20 +50,24 @@ to the whole page (x, y = top-left corner; 0..1). Roles:
 - deck: the line(s) directly supporting the headline.
 - cover_line: any other teaser or strap line.
 - band: a solid colour bar or banner behind text; give its colour in `background`.
-`text` is the text exactly as printed, with line breaks as \n (null for logos and bands). `color` is the main text
-colour as #RRGGBB. Do not list the background photograph or illustration itself."""
+- photo: a photograph or portrait placed on the page (not a logo). Do not list one that fills the whole page.
+`text` is the text exactly as printed, with line breaks as \n (null for logos, bands and photos). `color` is the main
+text colour as #RRGGBB."""
 
 WEIGHTS = {"regular": 400, "bold": 700, "black": 900}
 
 
 def _is_flat_image(page: dict) -> bool:
+    """No live text to measure: one flattened picture, or a cover assembled from images with its type outlined."""
     props = page.get("properties") or {}
-    return float(props.get("textCoverage") or 0) < 0.02 and float(props.get("imageCoverage") or 0) > 0.8
+    if float(props.get("textCoverage") or 0) >= 0.02:
+        return False
+    return float(props.get("imageCoverage") or 0) > 0.8 or page.get("layoutType") == "cover"
 
 
 def _vision_cover_blocks(pdf: bytes, page: dict) -> list[dict]:
     """Ask a vision-capable LLM where the text and logos sit on a flattened page. Raises LLMError on failure."""
-    llm = get_llm()
+    llm = get_vision_llm()
     png = render_page_png(pdf, page["pageNumber"], 1.4)
     out = llm.complete_json(system="You are a magazine art director measuring a page layout. Answer only from the image.",
                             prompt=COVER_VISION_PROMPT, schema=COVER_VISION_SCHEMA, images=[png], max_tokens=4000,
@@ -81,7 +85,7 @@ def _vision_cover_blocks(pdf: bytes, page: dict) -> list[dict]:
              "h": round(h, 4), "coverRole": role, "description": e.get("description"), "source": "vision",
              "align": e.get("align"), "weight": WEIGHTS.get(e.get("weight") or "regular", 400),
              "uppercase": bool(e.get("uppercase"))}
-        if role == "logo" or (role == "masthead" and not text):
+        if role in ("logo", "photo") or (role == "masthead" and not text):
             b.update(kind="image", role="image")
         elif role == "band":
             b.update(kind="shape", role="background", fill=e.get("background") or e.get("color"))
@@ -111,7 +115,7 @@ def _on_failure(ctx: JobContext, message: str) -> None:
 def _vision_refine(pdf: bytes, result: AnalysisResult, progress, pages: list[int] | None = None) -> bool:
     """Optional: ask a vision-capable LLM to double-check page types. Returns True if used."""
     s = get_settings()
-    llm = get_llm()
+    llm = get_vision_llm()
     if not s.llm_vision_reference_analysis or not llm.supports_vision or not llm.configured()[0]:
         return False
     targets = [p for p in result.pages if pages is None or p["pageNumber"] in pages]
@@ -227,7 +231,7 @@ def run_page_reanalysis(ctx: JobContext) -> None:
     # A page that is one flattened picture has no text to measure; a vision model locates its text and logos so
     # Reconstruct template can rebuild them as live frames. Re-analysis is an explicit request, so it runs here
     # whenever the provider can see images (LLM_VISION_REFERENCE_ANALYSIS only gates whole-document analysis).
-    llm = get_llm()
+    llm = get_vision_llm()
     if _is_flat_image(page) and llm.supports_vision and llm.configured()[0]:
         ctx.progress(85, "Locating text and logos with vision")
         try:

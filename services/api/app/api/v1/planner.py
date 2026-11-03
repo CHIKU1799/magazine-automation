@@ -9,17 +9,44 @@ from app.deps import DB, CurrentAuth, require
 from app.ids import new_id
 from app.models import Article, ExtractedFact, MagazinePage, Speaker
 from app.schemas.pages import MagazinePage as PageSchema
-from app.schemas.pages import PagesPutRequest, PagesPutResponse, PlanRecommendRequest, PlanRecommendResponse
-from app.services import planner
+from app.schemas.pages import (
+    PageAiEditRequest,
+    PageAiEditResponse,
+    PagesPutRequest,
+    PagesPutResponse,
+    PlanRecommendRequest,
+    PlanRecommendResponse,
+)
+from app.services import page_ai_edit, planner
 from app.services import serializers as ser
 from app.services.activity import record_activity
 from app.services.project_context import assets_by_id, dump, pages_dicts, profile_for_project
 from app.schemas.pages import Asset as AssetSchema
+from app.services.llm import LLMError, LLMNotConfigured, require_llm
 from app.services.template_store import ensure_reference_logos, reference_templates, template_exists
 
 from .common import PFRoute, get_project
 
 router = APIRouter(tags=["planner"], route_class=PFRoute)
+
+
+@router.post("/projects/{project_id}/pages/ai-edit", response_model=PageAiEditResponse)
+def ai_edit_page(project_id: str, body: PageAiEditRequest, db: DB, ctx=require("design.write")) -> PageAiEditResponse:
+    """Turns an instruction into validated frame operations. Nothing is saved: the editor applies them as one undo step."""
+    p = get_project(db, ctx, project_id)
+    llm = require_llm()
+    profile, _ = profile_for_project(db, p)
+    page = dump(body.page)
+    if page.get("locked"):
+        raise HTTPException(status_code=409, detail="This page is locked. Unlock it to edit it.")
+    try:
+        summary, ops, notes = page_ai_edit.ai_edit(llm, body.instruction, page, body.page_number, profile,
+                                                   list(assets_by_id(db, p.id).values()), body.selected_id)
+    except LLMNotConfigured as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e
+    except LLMError as e:
+        raise HTTPException(status_code=502, detail=f"The AI provider failed: {e}") from e
+    return PageAiEditResponse(summary=summary, operations=ops, notes=notes, provider=llm.name, model=llm.model)
 
 
 @router.get("/projects/{project_id}/pages", response_model=list[PageSchema])

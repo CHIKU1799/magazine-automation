@@ -7,7 +7,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from statistics import median
 
-from app.services.reference_analysis.blocks import TextBlock
+from app.services.reference_analysis.blocks import EDGE_FRACTION, TextBlock
 from app.services.reference_analysis.extract import Line, PageData
 
 
@@ -97,18 +97,21 @@ def baseline_pitch(lines: list[Line], body_size: float) -> list[float]:
 # ---------------------------------------------------------------- margins
 
 def page_content_bounds(page: PageData) -> tuple[float, float, float, float] | None:
-    """(left, top, right, bottom) margins implied by non-edge text + non-bleeding images."""
+    """(left, top, right, bottom) margins implied by non-edge text + non-bleeding images and rules.
+
+    Images and rules lying wholly in the header/footer band are page furniture (icons, folio rules), like edge text.
+    """
     items: list[tuple[float, float, float, float]] = [(ln.x0, ln.y0, ln.x1, ln.y1) for ln in page.lines if not ln.edge]
     if len(items) < 5:
         return None
     W, H = page.width, page.height
-    for im in page.images:
-        bleeds = im.x0 <= 1 or im.y0 <= 1 or im.x1 >= W - 1 or im.y1 >= H - 1
-        if not bleeds:
-            items.append((im.x0, im.y0, im.x1, im.y1))
-    for d in page.drawings:
-        if d.kind == "rule" and d.x0 > 1 and d.x1 < W - 1:
-            items.append((d.x0, d.y0, d.x1, d.y1))
+    band = EDGE_FRACTION * H + 2
+    for x0, y0, x1, y1 in [(im.x0, im.y0, im.x1, im.y1) for im in page.images] + \
+            [(d.x0, d.y0, d.x1, d.y1) for d in page.drawings if d.kind == "rule"]:
+        bleeds = x0 <= 1 or y0 <= 1 or x1 >= W - 1 or y1 >= H - 1
+        furniture = y1 <= band or y0 >= H - band
+        if not (bleeds or furniture):
+            items.append((x0, y0, x1, y1))
     left = min(i[0] for i in items)
     top = min(i[1] for i in items)
     right = W - max(i[2] for i in items)
@@ -203,6 +206,10 @@ def classify_page(f: PageFeatures, index: int, page_count: int) -> tuple[str, fl
             s["cover"] += 0.3
         if f.max_size >= 40:
             s["cover"] += 0.2
+        # A first page without running text is the cover, even when its type is flattened (max_size 0) and its
+        # photos and logos sit in a grid that would otherwise read as a gallery.
+        if f.body_lines < 5:
+            s["cover"] += 0.3
     elif heavy_image and f.max_size >= 48 and f.body_lines < 5:
         s["cover"] += 0.35
     if heavy_image and index > 0:

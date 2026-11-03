@@ -53,7 +53,8 @@ def _cmyk(hexv: str) -> list[float]:
 
 
 def _font_style(weight: int, italic: bool) -> str:
-    base = "Bold" if weight >= 700 else "Semibold" if weight >= 600 else "Light" if weight <= 300 else "Regular"
+    base = ("Black" if weight >= 900 else "ExtraBold" if weight >= 800 else "Bold" if weight >= 700 else
+            "Semibold" if weight >= 600 else "Medium" if weight >= 500 else "Light" if weight <= 300 else "Regular")
     if italic:
         return "Italic" if base == "Regular" else f"{base} Italic"
     return base
@@ -147,12 +148,16 @@ def build_contract(project: dict, profile: dict, pages: list[dict], articles: di
             patch["tracking"] = float(st["tracking"])
         if st.get("uppercase") is not None:
             patch["uppercase"] = bool(st["uppercase"])
+        if st.get("fontFamily"):
+            patch["font_family"] = str(st["fontFamily"])  # frames imported from a reference keep their own typeface
         if st.get("weight") is not None or st.get("italic") is not None:
             t = (profile.get("typography") or {}).get(role, {})
             weight = int(st.get("weight") or t.get("weight", 400))
             italic = bool(st["italic"]) if st.get("italic") is not None else bool(t.get("italic"))
             patch["font_style"] = _font_style(weight, italic)
             patch["fallback_family"] = reportlab_fallback(classification.get(role, "sans"), weight >= 600, italic)
+        if st.get("fontStyle"):
+            patch["font_style"] = str(st["fontStyle"])  # the face's own style name, as InDesign lists it
         patch = {k: v for k, v in patch.items() if base.get(k) != v}
         if not patch:
             return name
@@ -198,7 +203,8 @@ def build_contract(project: dict, profile: dict, pages: list[dict], articles: di
                     raw = folio_text(profile, i + 1, magazine, issue, section, (el.get("style") or {}).get("align", "right"))
                 elif el.get("dynamic") == "toc":
                     raw = toc_markup(toc_entries)
-                fr["content"] = markup_to_plain(raw)
+                # Imported reference text is set as written: no PressFlow markup to strip.
+                fr["content"] = raw if el.get("literal") else markup_to_plain(raw)
                 if markup_out is not None and raw:
                     markup_out[fid] = raw
                 if el.get("columns"):

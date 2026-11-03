@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from pathlib import Path
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
-from fastapi.responses import RedirectResponse, StreamingResponse
+from fastapi.responses import RedirectResponse, Response, StreamingResponse
 from PIL import Image, UnidentifiedImageError
 from sqlalchemy import delete, select
 
@@ -243,6 +244,32 @@ def update_asset(asset_id: str, body: AssetUpdate, ctx: CurrentAuth, db: DB) -> 
         setattr(a, k, v)
     db.commit()
     return ser.asset(a)
+
+
+@router.get("/projects/{project_id}/fonts.css")
+def project_fonts_css(project_id: str, ctx: CurrentAuth, db: DB) -> Response:
+    """Web fonts of a project imported from a reference PDF (empty for other projects)."""
+    from app.services.reference_import import fonts_css, fonts_prefix
+
+    p = get_project(db, ctx, project_id)
+    key = f"{fonts_prefix(p.org_id, p.id)}/manifest.json"
+    storage = get_storage()
+    css = fonts_css(json.loads(storage.get_bytes(key)), p.id) if storage.exists(key) else ""
+    return Response(css, media_type="text/css", headers={"Cache-Control": "private, max-age=300"})
+
+
+@router.get("/projects/{project_id}/fonts/{font_id}.woff")
+def project_font(project_id: str, font_id: str, ctx: CurrentAuth, db: DB) -> Response:
+    from app.services.reference_import import fonts_prefix
+
+    p = get_project(db, ctx, project_id)
+    if not font_id.replace("_", "").isalnum():
+        raise not_found("Font")
+    key = f"{fonts_prefix(p.org_id, p.id)}/{font_id}.woff"
+    storage = get_storage()
+    if not storage.exists(key):
+        raise not_found("Font")
+    return Response(storage.get_bytes(key), media_type="font/woff", headers={"Cache-Control": "private, max-age=86400"})
 
 
 @router.get("/assets/{asset_id}/file")

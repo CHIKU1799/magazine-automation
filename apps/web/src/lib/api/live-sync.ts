@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { toast } from "sonner";
-import type { Article, DesignProfile, EventSession, ExtractedFact, MagazinePage, ReferencePage, Speaker } from "@/lib/domain/types";
+import type { Article, DesignProfile, EventSession, ExtractedFact, MagazinePage, ReferencePage, Speaker, Template } from "@/lib/domain/types";
 import { useWorkspace, type WorkspaceState } from "@/lib/store/workspace";
 import { apiFetch } from "./client";
 import { live } from "./live";
@@ -15,7 +15,7 @@ function replaceFor<K extends ProjectScoped>(state: WorkspaceState, key: K, proj
   return [...others, ...(rows as { projectId: string }[])] as WorkspaceState[K];
 }
 
-async function loadLists() {
+export async function loadLists() {
   const [projects, references, templates] = await Promise.all([live.listProjects(), live.listReferences(), live.listTemplates().catch(() => [])]);
   const profiles = (await Promise.all(references.filter((r) => r.designProfileId).map((r) => live.profile(r.designProfileId!).catch(() => null)))).filter((p): p is DesignProfile => !!p);
   const refPages = (await Promise.all(references.filter((r) => r.status === "analysed" || r.status === "approved").map((r) => live.referencePages(r.id).catch(() => [] as ReferencePage[])))).flat();
@@ -52,6 +52,13 @@ export async function loadWorkspace(projectId: string) {
     exports: replaceFor(s, "exports", projectId, ws.exports),
   }));
   hydratedPages = useWorkspace.getState().pages.filter((p) => p.projectId === projectId);
+}
+
+/** A cover rebuilt from a reference shows logo artwork cropped from it; make sure the crops exist before composing. */
+export async function ensureTemplateLogos(projectId: string, template: Template | undefined) {
+  if (useWorkspace.getState().mode !== "live" || !template?.slots.some((s) => s.assetTag)) return;
+  const logos = await live.templateLogos(projectId, template.id);
+  useWorkspace.setState((s) => ({ assets: [...logos, ...s.assets.filter((a) => !logos.some((l) => l.id === a.id))] }));
 }
 
 const CONTENT_FIELDS: (keyof Article)[] = ["kicker", "headline", "subheadline", "byline", "intro", "body", "captions", "suggestedImageIds", "quoteFactIds", "reviewNote"];

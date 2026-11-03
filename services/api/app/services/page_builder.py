@@ -69,6 +69,46 @@ def folio_element(profile: dict, page_number: int, z: int) -> dict:
             "style": {"align": "center" if center else ("right" if la["recto"] else "left")}, "locked": True}
 
 
+HAIRLINE = 0.75
+
+
+def house_style_elements(profile: dict, page_number: int, content: list[dict]) -> list[dict]:
+    """The reference's recurring chrome for this page's side plus rules between body text columns (houseStyleElements)."""
+    W, H = float(profile["page"]["widthPt"]), float(profile["page"]["heightPt"])
+    b = float(profile["page"].get("bleedPt") or 0)
+    side = "recto" if page_number % 2 == 1 else "verso"
+    rule_fill = profile["colors"]["rule"]
+    out: list[dict] = []
+    for i, f in enumerate(f for f in profile.get("furniture") or [] if f["side"] == side):
+        vertical = f["kind"] == "rule" and f["h"] > f["w"]
+        x, y = f["x"] * W, f["y"] * H
+        w = HAIRLINE if f["kind"] == "rule" and vertical else max(f["w"] * W, HAIRLINE)
+        h = HAIRLINE if f["kind"] == "rule" and not vertical else max(f["h"] * H, HAIRLINE)
+        if f["x"] <= 0.005:
+            x, w = x - b, w + b
+        if f["x"] + f["w"] >= 0.995:
+            w += b
+        if f["y"] <= 0.005:
+            y, h = y - b, h + b
+        if f["y"] + f["h"] >= 0.995:
+            h += b
+        rule = f["kind"] == "rule"
+        out.append({"id": f"el_furn{i + 1}", "kind": f["kind"], "role": "rule" if rule else "accent_bar",
+                    "name": "Furniture rule" if rule else "Furniture", "x": _r(x), "y": _r(y), "w": _r(w), "h": _r(h),
+                    "z": -50 + i, "fill": f.get("fill") or rule_fill, "locked": True})
+    if (profile.get("grid") or {}).get("columnRules"):
+        bodies = [e for e in content if e.get("kind") == "text" and e.get("styleRole") == "body" and not e.get("dynamic")
+                  and (e.get("columns") or 1) > 1]
+        for k, e in enumerate(bodies):
+            cols, gutter = e["columns"], e.get("gutter") or profile["grid"]["gutterPt"]
+            col_w = (e["w"] - gutter * (cols - 1)) / cols
+            for c in range(1, cols):
+                out.append({"id": f"el_colrule{k + 1}_{c}", "kind": "rule", "role": "rule", "name": "Column rule",
+                            "x": _r(e["x"] + c * col_w + (c - 0.5) * gutter - HAIRLINE / 2), "y": e["y"], "w": HAIRLINE,
+                            "h": e["h"], "z": e["z"], "fill": rule_fill, "locked": True})
+    return out
+
+
 def build_elements(template: dict, profile: dict, page_number: int, content: PageContent, page_type: str) -> list[dict]:
     slots = resolve_slots(template, profile, page_number)
     t = profile["typography"]
@@ -194,6 +234,8 @@ def build_elements(template: dict, profile: dict, page_number: int, content: Pag
     spec = SPEC_BY_ID.get(template.get("id") or "")
     if spec is None or spec.get("folio", True) is not False:  # reference templates always get a folio
         elements.append(folio_element(profile, page_number, len(elements)))
+        if page_type != "cover":
+            elements += house_style_elements(profile, page_number, elements)
     if content.ad_asset_id and not any(e["role"] == "ad" for e in elements):
         b = float(profile["page"].get("bleedPt", 9))
         elements.insert(0, {"id": "el_ad", "kind": "image", "role": "ad", "name": "Advertisement", "x": -b, "y": -b,

@@ -11,10 +11,11 @@ from sqlalchemy import select
 from app.config import get_settings
 from app.deps import DB, CurrentAuth, require
 from app.ids import new_id
-from app.models import Job, ReferenceMagazine, ReferencePage
+from app.models import Job, Project, ReferenceMagazine, ReferencePage
 from app.schemas.pages import JobRef
 from app.schemas.reference import (
     AnalyseResponse,
+    ReferenceImportResponse,
     ReferenceMagazine as RefSchema,
     ReferencePage as RefPageSchema,
     ReferencePageUpdate,
@@ -23,6 +24,7 @@ from app.schemas.reference import (
 from app.services import serializers as ser
 from app.services.activity import record_activity
 from app.services.jobs.queue import enqueue
+from app.services.project_defaults import default_config
 from app.services.reference_analysis import render_page_png
 from app.services.reference_analysis.extract import open_pdf
 from app.services.storage import get_storage
@@ -123,6 +125,27 @@ def analyse(ref_id: str, db: DB, ctx=require("design.write")) -> AnalyseResponse
     job = _start_analysis(db, ref)
     db.commit()
     return AnalyseResponse(job_id=job.id, reference=ser.reference(ref))
+
+
+@router.post("/{ref_id}/import", response_model=ReferenceImportResponse, status_code=202)
+def import_reference(ref_id: str, db: DB, ctx=require("project.create")) -> ReferenceImportResponse:
+    """Start an editable copy of the reference: a new project whose pages reproduce the PDF frame by frame."""
+    ref = get_reference(db, ctx, ref_id)
+    if not ref.storage_key:
+        raise HTTPException(status_code=409, detail="This reference has no stored PDF to copy (demo record).")
+    cfg = default_config(ref.page_count or None)
+    p = Project(id=new_id("prj"), org_id=ctx.org_id, title=f"{ref.title} (editable)"[:300], status="setup",
+                target_page_count=cfg.target_page_count, reference_id=ref.id, design_profile_id=ref.design_profile_id,
+                config=cfg.model_dump(by_alias=True), owner_id=ctx.user_id,
+                description=f"Editable copy of the reference magazine {ref.title}.")
+    db.add(p)
+    db.flush()
+    job = enqueue(db, "reference_import", {"referenceId": ref.id, "projectId": p.id}, org_id=ctx.org_id,
+                  max_attempts=1, result_ref=p.id)
+    record_activity(db, org_id=ctx.org_id, actor_id=ctx.user_id, verb="started an editable copy of", target=ref.title,
+                    kind="project", project_id=p.id)
+    db.commit()
+    return ReferenceImportResponse(project_id=p.id, job_id=job.id)
 
 
 @router.get("/{ref_id}/pages", response_model=list[RefPageSchema])

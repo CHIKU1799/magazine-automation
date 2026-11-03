@@ -230,12 +230,18 @@ def derive_cover_template(page: dict, reference_title: str) -> dict | None:
         return None
     H = float(page.get("heightPt") or 792)
     tid = ref_template_id(page["referenceId"], page["pageNumber"])
-    slots: list[dict] = [{"id": "bg", "role": "hero_image", "x": 0, "y": 0, "w": 1, "h": 1, "name": "Cover image",
-                          "bleed": _edges(0, 0, 1, 1)}]
+    # The largest placed photograph becomes the cover image; without one, the cover image fills the page.
+    photos = sorted((b for b in vision if b["coverRole"] == "photo"), key=lambda b: -b["w"] * b["h"])
+    hero = photos[0] if photos else {"x": 0, "y": 0, "w": 1, "h": 1}
+    slots: list[dict] = [{"id": "bg", "role": "hero_image", "x": hero["x"], "y": hero["y"], "w": hero["w"], "h": hero["h"],
+                          "name": "Cover image", "bleed": _edges(hero["x"], hero["y"], hero["w"], hero["h"])}]
     for i, b in enumerate(b for b in vision if b["coverRole"] == "band"):
         slots.append({"id": f"band{i + 1}", "role": "background", "x": b["x"], "y": b["y"], "w": b["w"], "h": b["h"],
                       "name": "Band", **({"fill": b["fill"]} if b.get("fill") else {}), "opacity": 1,
                       "bleed": _edges(b["x"], b["y"], b["w"], b["h"])})
+    for i, b in enumerate(photos[1:]):
+        slots.append({"id": f"photo{i + 1}", "role": "image", "x": b["x"], "y": b["y"], "w": b["w"], "h": b["h"],
+                      "name": "Photo", "bleed": _edges(b["x"], b["y"], b["w"], b["h"])})
     logos = [b for b in vision if b["coverRole"] == "logo" or (b["coverRole"] == "masthead" and b.get("kind") == "image")]
     for i, b in enumerate(logos):
         sid = f"logo{i + 1}"
@@ -269,7 +275,8 @@ def derive_cover_template(page: dict, reference_title: str) -> dict | None:
         "id": tid, "name": f"Cover — reference p.{page['pageNumber']}", "pageType": "cover", "source": "reference",
         "referencePageNumber": page["pageNumber"],
         "description": (f"Rebuilt from page {page['pageNumber']} of {reference_title}: {len(slots)} frames — live "
-                        f"masthead, headline and cover lines, {len(logos)} logo graphic(s) and the cover image."),
+                        f"masthead, headline and cover lines, {len(logos)} logo graphic(s) and "
+                        f"{max(1, len(photos))} photo frame(s)."),
         "slots": slots, "columns": 1,
     }
 

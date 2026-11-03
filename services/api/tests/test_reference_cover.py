@@ -69,7 +69,7 @@ def _flat_cover_pdf() -> bytes:
 
 
 def test_flattened_cover_becomes_live_frames(client, owner, monkeypatch):
-    monkeypatch.setattr(reference_jobs, "get_llm", lambda: FakeVision())
+    monkeypatch.setattr(reference_jobs, "get_vision_llm", lambda: FakeVision())
     h = owner["headers"]
     ref = client.post("/api/v1/references", headers=h, files={"file": ("flat-cover.pdf", _flat_cover_pdf(), "application/pdf")},
                       data={"title": "Flat cover"}).json()["reference"]
@@ -125,3 +125,32 @@ def test_flattened_cover_becomes_live_frames(client, owner, monkeypatch):
     logo = next(f for f in contract["pages"][0]["frames"] if f["label"].startswith("Logo:"))
     assert logo["kind"] == "image" and logo["image"]["asset_id"]
     assert frames  # every frame carries an id InDesign scripts can address
+
+
+def test_cover_assembled_from_images_needs_vision():
+    """Outlined type and separate logo/photo images: not one picture, but still no live text to measure."""
+    cover = {"layoutType": "cover", "properties": {"textCoverage": 0.0, "imageCoverage": 0.55}}
+    assert reference_jobs._is_flat_image(cover)
+    assert not reference_jobs._is_flat_image({**cover, "layoutType": "photo_gallery"})
+    assert not reference_jobs._is_flat_image({**cover, "properties": {"textCoverage": 0.2, "imageCoverage": 0.55}})
+
+
+def test_cover_photos_place_the_cover_image():
+    from app.services.templates import derive_cover_template
+
+    def block(role, x, y, w, h, **kw):
+        return {"coverRole": role, "kind": "image", "x": x, "y": y, "w": w, "h": h, **kw}
+
+    page = {"referenceId": "ref_x", "pageNumber": 1, "heightPt": 788, "blocks": [
+        block("masthead", 0.1, 0.05, 0.5, 0.1, kind="text", sample="Mag"),
+        block("photo", 0.1, 0.3, 0.15, 0.12),
+        block("photo", 0, 0.65, 1, 0.35),
+        block("photo", 0.3, 0.3, 0.15, 0.12),
+    ]}
+    slots = {s["id"]: s for s in derive_cover_template(page, "Ref")["slots"]}
+    assert (slots["bg"]["y"], slots["bg"]["h"]) == (0.65, 0.35)  # the largest photo, not the whole page
+    assert slots["bg"]["bleed"] == {"bottom": True, "left": True, "right": True}
+    assert slots["photo1"]["role"] == "image" and slots["photo2"]["role"] == "image" and "photo3" not in slots
+
+    without = derive_cover_template({**page, "blocks": page["blocks"][:1]}, "Ref")["slots"][0]
+    assert (without["x"], without["y"], without["w"], without["h"]) == (0, 0, 1, 1)

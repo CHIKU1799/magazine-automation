@@ -17,7 +17,7 @@ from typing import BinaryIO, Protocol
 
 from app.config import Settings, get_settings
 
-PREFIXES = ("videos", "audio", "references", "extracted", "exports", "assets")
+PREFIXES = ("videos", "audio", "references", "extracted", "exports", "assets", "fonts")
 
 
 class StorageError(RuntimeError):

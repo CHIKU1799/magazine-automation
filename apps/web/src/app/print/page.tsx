@@ -5,7 +5,9 @@ import { useSearchParams } from "next/navigation";
 import { Printer } from "lucide-react";
 import { useWorkspace } from "@/lib/store/workspace";
 import { useProjectData } from "@/lib/store/hooks";
+import { loadLists, loadWorkspace } from "@/lib/api/live-sync";
 import { PageView } from "@/components/magazine/page-view";
+import { ProjectFonts } from "@/components/magazine/project-fonts";
 import { Button } from "@/components/ui/button";
 
 /**
@@ -15,19 +17,33 @@ import { Button } from "@/components/ui/button";
 function PrintView() {
   const params = useSearchParams();
   const hydrated = useWorkspace((s) => s.hasHydrated);
-  const data = useProjectData(params.get("project") ?? undefined);
+  const mode = useWorkspace((s) => s.mode);
+  const projectId = params.get("project") ?? undefined;
+  const data = useProjectData(projectId);
   const { profile, pages, project } = data;
   const auto = params.get("auto") === "1";
   const [fontsReady, setFontsReady] = React.useState(false);
+  // Live data is not kept in the browser and this page sits outside the app shell, so load it here.
+  const [loaded, setLoaded] = React.useState(false);
+  const [loadError, setLoadError] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     document.fonts.ready.then(() => setFontsReady(true));
   }, []);
   React.useEffect(() => {
-    if (auto && fontsReady && hydrated && pages.length) setTimeout(() => window.print(), 400);
-  }, [auto, fontsReady, hydrated, pages.length]);
+    if (!hydrated) return;
+    if (mode !== "live" || !projectId) return setLoaded(true);
+    loadLists()
+      .then(() => loadWorkspace(projectId))
+      .then(() => setLoaded(true), (e) => setLoadError((e as Error).message));
+  }, [hydrated, mode, projectId]);
+  React.useEffect(() => {
+    if (auto && fontsReady && loaded && pages.length) setTimeout(() => window.print(), 400);
+  }, [auto, fontsReady, loaded, pages.length]);
 
   if (!hydrated) return null;
+  if (loadError) return <p className="p-10 text-sm">Couldn’t load the issue: {loadError}</p>;
+  if (!loaded) return <p className="p-10 text-sm text-ink-3">Loading pages…</p>;
   if (!profile || !project) return <p className="p-10 text-sm">Nothing to print — open this from the Export Centre.</p>;
   const W = profile.page.widthPt;
   const H = profile.page.heightPt;
@@ -35,6 +51,7 @@ function PrintView() {
   return (
     <>
       <style>{`@page { size: ${W}pt ${H}pt; margin: 0 } @media print { html, body { background: #fff !important } .sheet { break-after: page; box-shadow: none !important; margin: 0 !important } }`}</style>
+      <ProjectFonts projectId={project.id} />
       <div className="no-print sticky top-0 z-10 flex items-center gap-3 border-b border-line bg-surface px-6 py-3 text-sm">
         <span className="font-medium">{project.title}</span>
         <span className="text-ink-3">
