@@ -305,7 +305,7 @@ class ImageCache:
 
 
 def image_elements(doc: pymupdf.Document, page: pymupdf.Page, ox: float, oy: float, W: float, H: float, bleed: float,
-                   save: SaveAsset, cache: ImageCache, z0: int) -> tuple[list[dict], set[int]]:
+                   save: SaveAsset, cache: ImageCache, z0: int, every_photo: bool = False) -> tuple[list[dict], set[int]]:
     """Placed photographs as image frames (cropped to what shows on the page). Returns elements and their xrefs."""
     elements, xrefs = [], set()
     try:
@@ -346,7 +346,9 @@ def image_elements(doc: pymupdf.Document, page: pymupdf.Page, ox: float, oy: flo
             iw, ih = img.size
             img = img.crop((round(crop[0] * iw), round(crop[1] * ih), max(round(crop[0] * iw) + 1, round(crop[2] * iw)),
                             max(round(crop[1] * ih) + 1, round(crop[3] * ih))))
-            if not _shows_as_is(page, img, (vx0 + ox, vy0 + oy, vx1 + ox, vy1 + oy)):
+            # A copy keeps a picture that a fade or overlay changes in the background, where it looks as printed;
+            # a page refilled with new content (`every_photo`) needs every old picture out of the background.
+            if not every_photo and not _shows_as_is(page, img, (vx0 + ox, vy0 + oy, vx1 + ox, vy1 + oy)):
                 skipped.add(xref)
                 continue
             ppi = img.width / ((vx1 - vx0) / 72)
@@ -424,13 +426,13 @@ def background_element(img: Image.Image, save: SaveAsset, W: float, H: float, bl
 
 
 def build_live_page(src: pymupdf.Document, work: pymupdf.Document, index: int, faces: dict[str, FaceInfo],
-                    profile: dict, save: SaveAsset, cache: ImageCache) -> list[dict]:
+                    profile: dict, save: SaveAsset, cache: ImageCache, every_photo: bool = False) -> list[dict]:
     page = src[index]
     ox, oy, W, H = _page_frame(page)
     bleed = float(profile["page"].get("bleedPt") or 0)
     body = float((profile.get("typography") or {}).get("body", {}).get("size") or 10)
     blocks, rects = _pieces(page, ox, oy)
-    images, xrefs = image_elements(src, page, ox, oy, W, H, bleed, save, cache, z0=1)
+    images, xrefs = image_elements(src, page, ox, oy, W, H, bleed, save, cache, z0=1, every_photo=every_photo)
     bg = render_background(work, index, ox, oy, W, H, bleed, xrefs, rects)
     elements: list[dict] = []
     if not is_blank(bg, profile["colors"].get("paper") or "#FFFFFF"):

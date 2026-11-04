@@ -23,6 +23,10 @@ PATCHABLE = ("page", "margins", "grid", "typography", "colors", "folio", "images
 
 @router.get("/{profile_id}", response_model=ProfileSchema)
 def get_profile_route(profile_id: str, ctx: CurrentAuth, db: DB) -> ProfileSchema:
+    if profile_id == "house_style":  # what a project without a reference is set in
+        from app.services.house_style import house_profile
+
+        return ProfileSchema.model_validate(house_profile())
     return ser.design_profile(get_profile(db, ctx, profile_id))
 
 

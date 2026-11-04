@@ -79,6 +79,8 @@ export default function ExportsPage() {
   const availability = (f: ExportFormat): { renderer: ExportRenderer; available: boolean; reason?: string; label?: string } => {
     switch (f) {
       case "pdf_digital":
+        // Pages built from a reference carry their own fonts and layouts, which only the browser renderer reproduces.
+        if (pages.some((p) => p.elements.some((e) => e.literal))) return { renderer: "browser", available: true };
         if (apiLive) return { renderer: "reportlab", available: true };
         // A live workspace's pages live in the API, so the browser print view has nothing to fall back on.
         if (mode === "live") return { renderer: "reportlab", available: false, reason: api.checking ? "Checking the PressFlow API…" : "The PressFlow API isn't reachable. Start it, then reload this page." };
@@ -284,7 +286,8 @@ export default function ExportsPage() {
                     <Td className="whitespace-nowrap text-xs text-ink-3">{formatDateTime(e.createdAt)}</Td>
                     <Td className="whitespace-nowrap text-xs text-ink-3">{members.find((m) => m.userId === e.createdBy)?.name ?? "You"}</Td>
                     <Td>
-                      {e.status === "complete" && e.format !== "pdf_digital" && (
+                      {/* A digital PDF made in the browser is only a print dialog; one from the API is a stored file. */}
+                      {e.status === "complete" && (e.format !== "pdf_digital" || e.renderer !== "browser") && (
                         <Tooltip content={e.renderer === "browser" ? "Regenerate and download" : "Download"}>
                           <Button variant="ghost" size="icon-xs" loading={busy === e.id} onClick={() => download(e)} aria-label="Download">
                             <Download />

@@ -107,6 +107,12 @@ export const live = {
   /** Proposed, validated frame operations for one page; nothing is saved server-side. */
   aiEditPage: (projectId: string, body: { page: MagazinePage; pageNumber: number; instruction: string; selectedId?: string }) => apiFetch<AiPageEdit>(`/projects/${projectId}/pages/ai-edit`, { method: "POST", json: body }),
   savePages: (projectId: string, pages: MagazinePage[]) => apiFetch<{ pages: MagazinePage[]; preservedLocked: string[] }>(`/projects/${projectId}/pages`, { method: "PUT", json: { pages } }),
+  /** AI Builder: transcripts -> articles -> a whole magazine in the reference's design (one job). */
+  aiBuild: (projectId: string, body: { referenceId?: string; rewrite?: boolean; aiImages?: boolean; noReference?: boolean } = {}) => apiFetch<JobRef>(`/projects/${projectId}/ai-build`, { method: "POST", json: body }),
+  /** The checking agent: looks at every page as it stands, fixes what's broken and notes the rest. */
+  aiReview: (projectId: string) => apiFetch<JobRef>(`/projects/${projectId}/ai-review`, { method: "POST" }),
+  /** Design with reference (AI): the project's articles set into pages copied from its reference magazine. */
+  referenceFill: (projectId: string, body: { referenceId?: string; articleIds?: string[] } = {}) => apiFetch<JobRef>(`/projects/${projectId}/reference-fill`, { method: "POST", json: body }),
   recommendPlan: (projectId: string) => apiFetch<{ pages: MagazinePage[]; rationale: string[]; engine: string }>(`/projects/${projectId}/plan/recommend`, { method: "POST" }),
 
   createExport: (projectId: string, format: ExportFormat, contract: unknown) => apiFetch<ExportRecord>(`/projects/${projectId}/exports`, { method: "POST", json: { format, contract } }),

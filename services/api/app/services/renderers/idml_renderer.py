@@ -82,7 +82,8 @@ def _story(sid: str, text: str, ps: dict, colour_ref: str) -> str:
         content = escape(para).replace("\n", " ")  # forced line break: the line ends where it did
         body.append(f'<ParagraphStyleRange AppliedParagraphStyle="ParagraphStyle/$ID/NormalParagraphStyle" '
                     f'Justification="{JUSTIFY.get(ps.get("align") or "left", "LeftAlign")}" '
-                    f'FirstLineIndent="{_n(ps.get("first_line_indent_pt") or 0) if i else 0}" Hyphenation="false">'
+                    f'FirstLineIndent="{_n(ps.get("first_line_indent_pt") or 0) if i else 0}" '
+                    f'SpaceBefore="{_n(ps.get("space_before_pt") or 0) if i else 0}" Hyphenation="false">'
                     f'<CharacterStyleRange {attrs}>{props}<Content>{content}</Content>'
                     + ("<Br/>" if i < len(paras) - 1 else "") + "</CharacterStyleRange></ParagraphStyleRange>")
     return (f'{HEAD}<idPkg:Story {PKG} DOMVersion="{DOM}"><Story Self="{sid}" AppliedTOCStyle="n" TrackChanges="false" '

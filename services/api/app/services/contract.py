@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -156,6 +157,8 @@ def build_contract(project: dict, profile: dict, pages: list[dict], articles: di
             italic = bool(st["italic"]) if st.get("italic") is not None else bool(t.get("italic"))
             patch["font_style"] = _font_style(weight, italic)
             patch["fallback_family"] = reportlab_fallback(classification.get(role, "sans"), weight >= 600, italic)
+        if st.get("spaceBefore"):
+            patch["space_before_pt"] = round(float(st["spaceBefore"]), 2)
         if st.get("fontStyle"):
             patch["font_style"] = str(st["fontStyle"])  # the face's own style name, as InDesign lists it
         patch = {k: v for k, v in patch.items() if base.get(k) != v}
@@ -196,7 +199,10 @@ def build_contract(project: dict, profile: dict, pages: list[dict], articles: di
             if kind == "text":
                 fr["kind"] = "text"
                 role = el.get("styleRole") or (el.get("role") if el.get("role") in ROLE_NAMES else "body")
-                fr["paragraph_style"] = frame_style(role, el.get("style"))
+                st = dict(el.get("style") or {})
+                if el.get("paragraphGap"):
+                    st["spaceBefore"] = float(el["paragraphGap"])  # paragraphs in a column copied from a reference
+                fr["paragraph_style"] = frame_style(role, st)
                 raw = el.get("text") or ""
                 if el.get("dynamic") == "folio":
                     section = ((art or {}).get("kicker") or "").split("·")[0].strip() or page_type_label(p["pageType"])
@@ -204,7 +210,8 @@ def build_contract(project: dict, profile: dict, pages: list[dict], articles: di
                 elif el.get("dynamic") == "toc":
                     raw = toc_markup(toc_entries)
                 # Imported reference text is set as written: no PressFlow markup to strip.
-                fr["content"] = raw if el.get("literal") else markup_to_plain(raw)
+                # Imported reference text is set as written; its only marker is a "## " subhead line.
+                fr["content"] = (re.sub(r"(?m)^## ", "", raw) if el.get("literal") else markup_to_plain(raw))
                 if markup_out is not None and raw:
                     markup_out[fid] = raw
                 if el.get("columns"):

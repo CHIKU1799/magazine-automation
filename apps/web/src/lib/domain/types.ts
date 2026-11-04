@@ -531,6 +531,8 @@ export interface PageElement {
   };
   /** Text set exactly as written: line breaks kept, no PressFlow markup (frames copied from a reference PDF). */
   literal?: boolean;
+  /** Space between paragraphs, in points (article text set into a column copied from a reference). */
+  paragraphGap?: number;
   columns?: number;
   gutter?: number;
   /* image */
@@ -675,7 +677,10 @@ export interface Job {
     | "article_generation"
     | "export_render"
     | "page_reanalysis"
-    | "reference_import";
+    | "reference_import"
+    | "reference_fill"
+    | "ai_build"
+    | "ai_review";
   status: JobStatus;
   progress: number;
   message?: string;

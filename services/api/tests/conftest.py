@@ -27,8 +27,10 @@ os.environ.update({
     "ANTHROPIC_API_KEY": "",
     # Never let a developer's real key from services/api/.env reach a paid API from the test suite.
     "OPENAI_API_KEY": "",
+    "OPENAI_MODEL": "gpt-4.1",
     "OPENAI_BASE_URL": "https://api.openai.invalid/v1",
     "IMAGE_API_KEY": "",
+    "IMAGE_MODEL": "gpt-image-2",
     "IMAGE_BASE_URL": "",
     "LLM_VISION_PROVIDER": "",
     "LLM_VISION_API_KEY": "",

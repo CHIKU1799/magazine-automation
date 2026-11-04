@@ -255,7 +255,7 @@ class ActivityItem(CamelModel):
 
 
 JobKind = Literal["video_pipeline", "reference_analysis", "article_generation", "export_render", "page_reanalysis",
-                  "reference_import"]
+                  "reference_import", "reference_fill", "ai_build", "ai_review"]
 
 
 class Job(CamelModel):
@@ -269,6 +269,24 @@ class Job(CamelModel):
     updated_at: ISODate
     result_ref: ID | None = None
     error: str | None = None
+
+
+class ReferenceFillRequest(CamelModel):
+    """Design with reference (AI): which reference to copy pages from (the project's own when omitted) and which
+    articles to set (every article that isn't rejected when omitted)."""
+
+    reference_id: ID | None = None
+    article_ids: list[ID] | None = None
+
+
+class AiBuildRequest(CamelModel):
+    """AI Builder: the reference to design with (the project's own when omitted); `rewrite` writes new articles
+    from the transcripts even when the project already has some."""
+
+    reference_id: ID | None = None
+    rewrite: bool = False
+    ai_images: bool = True  # empty photo frames get AI images (labelled) when an image model is configured
+    no_reference: bool = False  # no reference: the built-in templates and house style, chosen for the content
 
 
 class JobRef(CamelModel):

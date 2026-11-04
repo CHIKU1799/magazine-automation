@@ -17,8 +17,11 @@ log = logging.getLogger("pressflow.worker")
 def load_handlers() -> None:
     """Import modules that register job handlers."""
     from app.services import (  # noqa: F401
+        ai_builder,
         editorial,
         exports,
+        page_review,
+        reference_fill,
         reference_import,
         reference_jobs,
         video_pipeline,

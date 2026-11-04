@@ -51,32 +51,38 @@ class FaceInfo:
     baseline_k: float = DEFAULT_BASELINE_K
     style_name: str = ""  # the font's own style name ("SemiBold", "Heavy", "Bold Italic"), which InDesign matches on
     files: list[dict] = field(default_factory=list)  # {"id", "bytes", "unicodeRange"} rebuilt subsets
-    metrics: bytes | None = None  # one rebuilt subset, for measuring text set in this face
-    coverage: set[int] = field(default_factory=set)
-    _font: object = field(default=None, repr=False)
+    # Every rebuilt subset of the face, for measuring text set in it: each holds only the letters the PDF used
+    # somewhere, so a letter is measured in whichever subset has it (their glyphs are the same face's).
+    metrics: list[tuple[bytes, set[int]]] = field(default_factory=list)
+    _fonts: list = field(default_factory=list, repr=False)
 
     def text_width(self, text: str, size: float, tracking: float = 0.0) -> float | None:
         """Natural width of `text` in this face at `size` pt (tracking in thousandths of an em), or None."""
-        font = self.metrics_font()
-        if font is None or not text:
+        fonts = self.metrics_fonts()
+        if not fonts or not text:
             return None
-        known = [font.getlength(ch) for ch in text if ord(ch) in self.coverage]
+        known = []
+        for ch in text:
+            font = next((f for f, cov in fonts if ord(ch) in cov), None)
+            if font is not None:
+                known.append(font.getlength(ch))
         if len(known) < 0.6 * len(text):
             return None
         avg = sum(known) / len(known)
         em = (sum(known) + avg * (len(text) - len(known))) / 100
         return (em + tracking / 1000 * (len(text) - 1)) * size
 
-    def metrics_font(self):
-        """The face at 100 pt for measuring advances (PIL), or None."""
-        if self._font is None and self.metrics:
+    def metrics_fonts(self) -> list:
+        """(PIL font at 100 pt, code points) for each subset that loads."""
+        if not self._fonts and self.metrics:
             from PIL import ImageFont
 
-            try:
-                self._font = ImageFont.truetype(io.BytesIO(self.metrics), 100)
-            except OSError:
-                self.metrics = None
-        return self._font
+            for data, cov in self.metrics:
+                try:
+                    self._fonts.append((ImageFont.truetype(io.BytesIO(data), 100), cov))
+                except OSError:
+                    continue
+        return self._fonts
 
 
 STYLE_SUFFIX = re.compile(r"(?<=.)(Thin|Hairline|ExtraLight|UltraLight|Light|Book|Regular|Medium|SemiBold|Semibold|"
@@ -281,10 +287,29 @@ def _from_truetype(content: bytes, code_map: dict[int, str], cid_keyed: bool, gi
             text = code_map.get(code) or _winansi(code)
             if text and len(text) == 1:
                 uni[ord(text)] = g
+    uni = _drawn_only(font, uni)
     for tag in DROP_TABLES:
         if tag in font:
             del font[tag]
     return font, uni
+
+
+def _drawn_only(font: TTFont, uni: dict[int, str]) -> dict[int, str]:
+    """Characters whose glyph really has an outline. A subset often keeps the whole font's character map but only the
+    shapes the PDF used: unicode-range would then claim letters that draw as blanks, instead of falling back."""
+    if "glyf" not in font:
+        return uni
+    glyf = font["glyf"]
+
+    def drawn(name: str, depth: int = 0) -> bool:
+        g = glyf[name]
+        if g.numberOfContours == 0:
+            return False
+        if g.isComposite():
+            return depth < 4 and all(drawn(c.glyphName, depth + 1) for c in g.components)
+        return True
+
+    return {u: g for u, g in uni.items() if u >= 0x20 and (chr(u).isspace() or drawn(g))}
 
 
 def _from_cff(content: bytes, code_map: dict[int, str], differences: dict[int, str]):
@@ -468,8 +493,7 @@ def collect_faces(doc: pymupdf.Document, google: GoogleFonts | None, progress=No
             if built:
                 # Google serves the original font, so its own metrics apply; a rebuilt subset uses the ones set here.
                 face.baseline_k = built["nativeK"] if face.google else built["baselineK"]
-                if face.metrics is None:
-                    face.metrics, face.coverage = built["bytes"], set(built["codepoints"])
+                face.metrics.append((built["bytes"], set(built["codepoints"])))
                 if not face.google:
                     face.files.append({"id": f"f{xref}", "bytes": built["bytes"],
                                        "unicodeRange": unicode_range(built["codepoints"])})

@@ -31,7 +31,8 @@ export function useProjectData(projectIdOverride?: string) {
     const projectArticles = by(articles);
     const projectPages = by(pages);
     const projectAssets = by(assets);
-    const profile = designProfiles.find((d) => d.id === project?.designProfileId);
+    // A project with no reference is set in the house style.
+    const profile = designProfiles.find((d) => d.id === (project?.designProfileId || "house_style"));
     const reference = references.find((r) => r.id === project?.referenceId);
     const toc = buildToc(projectPages, projectArticles);
     return {

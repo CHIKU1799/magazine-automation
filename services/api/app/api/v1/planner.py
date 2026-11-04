@@ -7,7 +7,7 @@ from sqlalchemy import delete, select
 
 from app.deps import DB, CurrentAuth, require
 from app.ids import new_id
-from app.models import Article, ExtractedFact, MagazinePage, Speaker
+from app.models import Article, ExtractedFact, MagazinePage, ReferenceMagazine, Speaker
 from app.schemas.pages import MagazinePage as PageSchema
 from app.schemas.pages import (
     PageAiEditRequest,
@@ -16,7 +16,10 @@ from app.schemas.pages import (
     PagesPutResponse,
     PlanRecommendRequest,
     PlanRecommendResponse,
+    ReferenceFillRequest,
 )
+from app.schemas.pages import AiBuildRequest
+from app.schemas.pages import JobRef
 from app.services import page_ai_edit, planner
 from app.services import serializers as ser
 from app.services.activity import record_activity
@@ -101,6 +104,85 @@ def put_pages(project_id: str, body: PagesPutRequest, db: DB, ctx=require("desig
     db.commit()
     rows = db.scalars(select(MagazinePage).where(MagazinePage.project_id == p.id).order_by(MagazinePage.position))
     return PagesPutResponse(pages=[ser.page(r) for r in rows], preserved_locked=preserved)
+
+
+@router.post("/projects/{project_id}/ai-build", response_model=JobRef, status_code=202)
+def ai_build(project_id: str, db: DB, body: AiBuildRequest | None = None, ctx=require("design.write")) -> JobRef:
+    """AI Builder: transcripts -> articles -> a whole magazine in the reference's design (one job)."""
+    from app.models import Job, TranscriptSegment
+    from app.services.jobs.queue import enqueue
+    from app.services.llm import get_llm
+
+    p = get_project(db, ctx, project_id)
+    body = body or AiBuildRequest()
+    ref = None if body.no_reference else db.get(ReferenceMagazine, body.reference_id or p.reference_id or "")
+    if not body.no_reference and (ref is None or ref.org_id != ctx.org_id or not ref.storage_key):
+        raise HTTPException(status_code=422, detail="Choose a reference magazine (with its PDF) to design with.")
+    if not db.scalar(select(TranscriptSegment.id).where(TranscriptSegment.project_id == p.id).limit(1)):
+        raise HTTPException(status_code=422, detail="Process at least one video first: the builder writes from "
+                                                    "its transcript.")
+    if not get_llm().configured()[0]:
+        raise HTTPException(status_code=503, detail="The AI Builder needs an AI provider (LLM_PROVIDER).")
+    running = db.scalar(select(Job).where(Job.kind == "ai_build", Job.result_ref == p.id,
+                                          Job.status.in_(("queued", "running"))))
+    if running:
+        return JobRef(job_id=running.id, job=ser.job(running))
+    if ref is None:
+        p.reference_id, p.design_profile_id = None, None  # the house style applies to a project with no reference
+    elif p.reference_id != ref.id:
+        p.reference_id, p.design_profile_id = ref.id, ref.design_profile_id or p.design_profile_id
+    job = enqueue(db, "ai_build", {"projectId": p.id, "referenceId": ref.id if ref else None, "rewrite": body.rewrite,
+                                   "aiImages": body.ai_images, "noReference": ref is None},
+                  org_id=ctx.org_id, max_attempts=1, result_ref=p.id)
+    record_activity(db, org_id=ctx.org_id, actor_id=ctx.user_id,
+                    verb=f"started the AI Builder with {ref.title if ref else 'its own design'}",
+                    target=p.title, kind="page", project_id=p.id)
+    db.commit()
+    return JobRef(job_id=job.id, job=ser.job(job))
+
+
+@router.post("/projects/{project_id}/ai-review", response_model=JobRef, status_code=202)
+def ai_review(project_id: str, db: DB, ctx=require("design.write")) -> JobRef:
+    """The checking agent on the pages as they stand: finds what's broken and fixes it."""
+    from app.models import Job
+    from app.services.jobs.queue import enqueue
+
+    p = get_project(db, ctx, project_id)
+    if not db.scalar(select(MagazinePage.id).where(MagazinePage.project_id == p.id).limit(1)):
+        raise HTTPException(status_code=422, detail="There are no pages to check yet.")
+    running = db.scalar(select(Job).where(Job.kind.in_(("ai_review", "ai_build")), Job.result_ref == p.id,
+                                          Job.status.in_(("queued", "running"))))
+    if running:
+        return JobRef(job_id=running.id, job=ser.job(running))
+    job = enqueue(db, "ai_review", {"projectId": p.id}, org_id=ctx.org_id, max_attempts=1, result_ref=p.id)
+    db.commit()
+    return JobRef(job_id=job.id, job=ser.job(job))
+
+
+@router.post("/projects/{project_id}/reference-fill", response_model=JobRef, status_code=202)
+def reference_fill(project_id: str, db: DB, body: ReferenceFillRequest | None = None,
+                   ctx=require("design.write")) -> JobRef:
+    """Design with reference (AI): set the project's articles into pages copied from its reference magazine."""
+    from app.services.jobs.queue import enqueue
+    from app.services.llm import get_llm
+
+    p = get_project(db, ctx, project_id)
+    body = body or ReferenceFillRequest()
+    ref = db.get(ReferenceMagazine, body.reference_id or p.reference_id or "")
+    if ref is None or ref.org_id != ctx.org_id:
+        raise HTTPException(status_code=422, detail="Choose a reference magazine for this project first.")
+    if not ref.storage_key:
+        raise HTTPException(status_code=409, detail="This reference has no stored PDF to copy pages from.")
+    if not db.scalar(select(Article.id).where(Article.project_id == p.id, Article.status != "rejected").limit(1)):
+        raise HTTPException(status_code=422, detail="Write the articles from the videos first (Content Studio).")
+    if not get_llm().configured()[0]:
+        raise HTTPException(status_code=503, detail="Design with reference needs an AI provider (LLM_PROVIDER).")
+    job = enqueue(db, "reference_fill", {"projectId": p.id, "referenceId": ref.id, "articleIds": body.article_ids},
+                  org_id=ctx.org_id, max_attempts=1, result_ref=p.id)
+    record_activity(db, org_id=ctx.org_id, actor_id=ctx.user_id, verb=f"started designing with {ref.title}",
+                    target=p.title, kind="page", project_id=p.id)
+    db.commit()
+    return JobRef(job_id=job.id, job=ser.job(job))
 
 
 @router.post("/projects/{project_id}/plan/recommend", response_model=PlanRecommendResponse)

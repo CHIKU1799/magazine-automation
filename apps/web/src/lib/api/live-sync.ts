@@ -17,7 +17,8 @@ function replaceFor<K extends ProjectScoped>(state: WorkspaceState, key: K, proj
 
 export async function loadLists() {
   const [projects, references, templates] = await Promise.all([live.listProjects(), live.listReferences(), live.listTemplates().catch(() => [])]);
-  const profiles = (await Promise.all(references.filter((r) => r.designProfileId).map((r) => live.profile(r.designProfileId!).catch(() => null)))).filter((p): p is DesignProfile => !!p);
+  const profileIds = [...references.flatMap((r) => (r.designProfileId ? [r.designProfileId] : [])), "house_style"];
+  const profiles = (await Promise.all(profileIds.map((id) => live.profile(id).catch(() => null)))).filter((p): p is DesignProfile => !!p);
   const refPages = (await Promise.all(references.filter((r) => r.status === "analysed" || r.status === "approved").map((r) => live.referencePages(r.id).catch(() => [] as ReferencePage[])))).flat();
   const s = useWorkspace.getState();
   s.hydrateLive({

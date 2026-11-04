@@ -9,6 +9,7 @@ import {
   Shapes,
   PackageCheck,
   Settings,
+  Wand2,
   type LucideIcon,
 } from "lucide-react";
 
@@ -24,6 +25,7 @@ export const NAV: NavItem[] = [
   { label: "Overview", href: "/app", icon: LayoutDashboard, shortcut: "G O" },
   { label: "Projects", href: "/app/projects", icon: FolderKanban, shortcut: "G P" },
   { label: "Create Magazine", href: "/app/new", icon: FilePlus2, shortcut: "C" },
+  { label: "AI Builder", href: "/app/builder", icon: Wand2, shortcut: "G B" },
   { label: "Reference Library", href: "/app/references", icon: LibraryBig, shortcut: "G R" },
   { label: "Event Media Library", href: "/app/media", icon: Clapperboard, shortcut: "G M" },
   { label: "Content Studio", href: "/app/studio", icon: NotebookPen, shortcut: "G S" },
@@ -48,6 +50,7 @@ export const SEGMENT_LABELS: Record<string, string> = {
   app: "Workspace",
   projects: "Projects",
   new: "Create Magazine",
+  builder: "AI Builder",
   references: "Reference Library",
   media: "Event Media Library",
   studio: "Content Studio",

@@ -60,7 +60,7 @@ def _image_from(r: httpx.Response) -> bytes:
     raise ImageGenError("The image service returned no image.")
 
 
-def generate(prompt: str, aspect: str) -> tuple[bytes, int, int]:
+def generate(prompt: str, aspect: str, quality: str | None = None) -> tuple[bytes, int, int]:
     """Returns (png_bytes, width, height). Raises ImageGenError with a message fit for the editor."""
     s = get_settings()
     ok, detail = configured()
@@ -74,7 +74,7 @@ def generate(prompt: str, aspect: str) -> tuple[bytes, int, int]:
         r = httpx.post(
             f"{base}/images/generations",
             headers={"Authorization": f"Bearer {key}"},
-            json={"model": s.image_model, "prompt": FRAMING + prompt.strip(), "size": size, "quality": s.image_quality,
+            json={"model": s.image_model, "prompt": FRAMING + prompt.strip(), "size": size, "quality": quality or s.image_quality,
                   "n": 1},
             timeout=s.image_timeout_seconds,
         )

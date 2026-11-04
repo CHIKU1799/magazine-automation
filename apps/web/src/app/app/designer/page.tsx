@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { DndContext, DragOverlay, KeyboardSensor, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, rectSortingStrategy, sortableKeyboardCoordinates, useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { CircleCheck, CircleDashed, Copy, FilePlus2, Lock, LockOpen, PanelsTopLeft, PencilRuler, Redo2, RefreshCw, ShieldCheck, Sparkles, Trash2, Undo2 } from "lucide-react";
+import { CircleCheck, CircleDashed, Copy, FilePlus2, Lock, LockOpen, PanelsTopLeft, PencilRuler, Redo2, RefreshCw, ShieldCheck, Sparkles, Trash2, Undo2, Wand2 } from "lucide-react";
 import { toast } from "sonner";
 import { useWorkspace } from "@/lib/store/workspace";
 import { useProjectData } from "@/lib/store/hooks";
@@ -21,7 +21,9 @@ import type { DesignStatus, MagazinePage, PageType } from "@/lib/domain/types";
 import { pageTypeLabel } from "@/lib/templates/derive";
 import { specsForPageType, templateSpecs } from "@/lib/templates/specs";
 import { recommendFlatplan, type Recommendation } from "@/lib/planner/recommend";
-import { ensureTemplateLogos } from "@/lib/api/live-sync";
+import { ensureTemplateLogos, loadWorkspace } from "@/lib/api/live-sync";
+import { live, waitForJob } from "@/lib/api/live";
+import { useApiStatus } from "@/lib/api/use-api-status";
 import { cn } from "@/lib/utils/cn";
 
 const PAGE_TYPES: PageType[] = ["cover", "toc", "editorial", "event_report", "two_column_article", "interview", "photo_gallery", "speaker_profile", "infographic", "full_page_image", "advertisement"];
@@ -50,6 +52,10 @@ export default function FlatplanPage() {
   const [showSpreads, setShowSpreads] = React.useState(true);
   const [recommendation, setRecommendation] = React.useState<Recommendation | null>(null);
   const [adding, setAdding] = React.useState(false);
+  const [filling, setFilling] = React.useState(false);
+  const references = useWorkspace((s) => s.references);
+  const mode = useWorkspace((s) => s.mode);
+  const api = useApiStatus();
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }));
 
   React.useEffect(() => {
@@ -66,6 +72,34 @@ export default function FlatplanPage() {
   }, [project, undo, redo]);
 
   if (!project) return null;
+  const reference = references.find((r) => r.id === project.referenceId);
+  const usable = articles.filter((a) => a.status !== "rejected");
+  const fillBlocked =
+    mode !== "live" || !api.online ? "Needs the PressFlow API" : !reference?.hasSourcePdf ? "Choose a reference magazine (with its PDF) for this project first" : !usable.length ? "Write the articles from your videos first, in Content Studio" : null;
+  // The API lays the pages out (a minute or two); the project's own cover and contents stay in front.
+  const designWithReference = async () => {
+    if (!reference) return;
+    const ok = await confirm({
+      title: `Design with ${reference.title}?`,
+      description: `AI picks pages from the reference for each of your ${usable.length} article${usable.length === 1 ? "" : "s"}, fits the copy to them and sets it in the reference's fonts. Your cover and contents page stay; other unlocked pages are replaced. Photo frames take this project's photos; any left over are left empty for you.`,
+      confirmLabel: "Design pages",
+    });
+    if (!ok) return;
+    const id = `fill-${project.id}`;
+    setFilling(true);
+    try {
+      const { jobId } = await live.referenceFill(project.id);
+      toast.loading("Designing with the reference…", { id, duration: Infinity });
+      const job = await waitForJob(jobId, (j) => toast.loading("Designing with the reference…", { id, description: j.message ?? undefined, duration: Infinity }), 2000, 30 * 60_000);
+      if (job.status !== "succeeded") throw new Error(job.error ?? job.message ?? "The design didn't finish.");
+      await loadWorkspace(project.id);
+      toast.success("Pages designed", { id, description: job.message ?? undefined, duration: 10000 });
+    } catch (err) {
+      toast.error("Couldn't design with the reference", { id, description: (err as Error).message, duration: 10000 });
+    } finally {
+      setFilling(false);
+    }
+  };
   if (!profile) {
     return (
       <div className="mx-auto max-w-[900px] px-6 py-16">
@@ -158,6 +192,13 @@ export default function FlatplanPage() {
           <Button variant="secondary" size="sm" onClick={() => setRecommendation(recommendFlatplan(project, articles, profile, adIds, pages, templates))}>
             <Sparkles /> Recommend sequence
           </Button>
+          <Tooltip content={fillBlocked ?? `AI sets your articles into pages copied from ${reference?.title}, in its fonts and layouts, all editable`}>
+            <span>
+              <Button variant="secondary" size="sm" disabled={!!fillBlocked} loading={filling} onClick={designWithReference}>
+                <Wand2 /> Design with reference
+              </Button>
+            </span>
+          </Tooltip>
           <Button variant="primary" size="sm" asChild>
             <Link href="/app/designer/preflight">
               <ShieldCheck /> Preflight

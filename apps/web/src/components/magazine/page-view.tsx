@@ -224,18 +224,26 @@ function Paragraphs({ el, profile }: { el: PageElement; profile: DesignProfile }
   const base = effectiveStyle(profile, el);
   if (el.literal) {
     // Copied text keeps the PDF's line breaks; justified, every line but a paragraph's last fills the measure.
-    if (el.style?.align !== "justify") return <>{paras.map((p, i) => <p key={i}>{p}</p>)}</>;
+    // Article text set into a copied column may carry "## " subheads (bold, in the frame's own face) and the
+    // column's paragraph spacing.
+    const justify = el.style?.align === "justify";
     return (
       <>
-        {paras.map((p, i) => (
-          <p key={i}>
-            {p.split("\n").map((line, j, all) => (
-              <span key={j} style={{ display: "block", textAlignLast: j < all.length - 1 ? "justify" : undefined }}>
-                {line}
-              </span>
-            ))}
-          </p>
-        ))}
+        {paras.map((p, i) => {
+          const subhead = p.startsWith("## ");
+          const body = subhead ? p.slice(3) : p;
+          return (
+            <p key={i} style={{ marginTop: i > 0 && el.paragraphGap ? el.paragraphGap : undefined, fontWeight: subhead ? 700 : undefined, textAlign: subhead ? "left" : undefined }}>
+              {justify && !subhead
+                ? body.split("\n").map((line, j, all) => (
+                    <span key={j} style={{ display: "block", textAlignLast: j < all.length - 1 ? "justify" : undefined }}>
+                      {line}
+                    </span>
+                  ))
+                : body}
+            </p>
+          );
+        })}
       </>
     );
   }

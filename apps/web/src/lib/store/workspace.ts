@@ -195,7 +195,7 @@ function setPath(obj: unknown, path: string, value: unknown): unknown {
 export function composeContextFor(state: Data, projectId: string): ComposeContext | null {
   const project = state.projects.find((p) => p.id === projectId);
   if (!project) return null;
-  const profile = state.designProfiles.find((d) => d.id === project.designProfileId) ?? state.designProfiles[0];
+  const profile = state.designProfiles.find((d) => d.id === project.designProfileId) ?? state.designProfiles.find((d) => d.id === "house_style") ?? state.designProfiles[0];
   if (!profile) return null;
   return {
     profile,

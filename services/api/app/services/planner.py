@@ -73,8 +73,9 @@ def cover_template(project: dict, existing_pages: list[dict], reference_template
 
 def recommend(project: dict, config: dict, articles: list[dict], assets: list[dict], profile: dict,
               existing_pages: list[dict], target: int | None = None, speakers: list[dict] | None = None,
-              facts: list[dict] | None = None, reference_templates: dict[str, dict] | None = None
-              ) -> tuple[list[dict], list[str]]:
+              facts: list[dict] | None = None, reference_templates: dict[str, dict] | None = None,
+              pad: bool = True) -> tuple[list[dict], list[str]]:
+    """`pad=False`: as many pages as the content needs, with no placeholders to reach a target count."""
     target = int(target or config.get("targetPageCount") or project.get("targetPageCount") or 24)
     rationale: list[str] = [f"Heuristic plan for {target} pages (deterministic; no AI involved)."]
     ref_counts: dict = profile.get("pageTypeCounts") or {}
@@ -163,6 +164,8 @@ def recommend(project: dict, config: dict, articles: list[dict], assets: list[di
     def total() -> int:
         return len(front) + sum(len(g) for g in body) + len(back)
 
+    if not pad:
+        target = total()
     if total() > target:
         rationale.append(f"Content needs {total()} pages; trimming to {target}.")
         while total() > target:

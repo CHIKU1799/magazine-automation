@@ -22,14 +22,10 @@ function PrintView() {
   const data = useProjectData(projectId);
   const { profile, pages, project } = data;
   const auto = params.get("auto") === "1";
-  const [fontsReady, setFontsReady] = React.useState(false);
   // Live data is not kept in the browser and this page sits outside the app shell, so load it here.
   const [loaded, setLoaded] = React.useState(false);
   const [loadError, setLoadError] = React.useState<string | null>(null);
 
-  React.useEffect(() => {
-    document.fonts.ready.then(() => setFontsReady(true));
-  }, []);
   React.useEffect(() => {
     if (!hydrated) return;
     if (mode !== "live" || !projectId) return setLoaded(true);
@@ -37,9 +33,21 @@ function PrintView() {
       .then(() => loadWorkspace(projectId))
       .then(() => setLoaded(true), (e) => setLoadError((e as Error).message));
   }, [hydrated, mode, projectId]);
+  // Print only once every page's fonts and pictures have arrived; a copied magazine's are many and large.
   React.useEffect(() => {
-    if (auto && fontsReady && loaded && pages.length) setTimeout(() => window.print(), 400);
-  }, [auto, fontsReady, loaded, pages.length]);
+    if (!auto || !loaded || !pages.length) return;
+    let cancelled = false;
+    (async () => {
+      await new Promise((r) => setTimeout(r, 500));
+      await document.fonts.ready;
+      await Promise.all(Array.from(document.images).map((img) => (img.complete ? null : new Promise((r) => { img.onload = img.onerror = r; }))));
+      await document.fonts.ready;
+      if (!cancelled) window.print();
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [auto, loaded, pages.length]);
 
   if (!hydrated) return null;
   if (loadError) return <p className="p-10 text-sm">Couldn’t load the issue: {loadError}</p>;
