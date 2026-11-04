@@ -259,6 +259,7 @@ class Renderer:
             return subprocess.run(
                 [self.browser, "--headless=new", "--disable-gpu", "--hide-scrollbars", "--no-first-run",
                  "--allow-file-access-from-files", f"--user-data-dir={profile_dir}",
+                 *os.environ.get("CHROME_FLAGS", "").split(),  # containers need --no-sandbox
                  f"--window-size={round(W * SCALE)},{round(H * SCALE)}", "--virtual-time-budget=10000", *args, url],
                 capture_output=True, timeout=120)
 
