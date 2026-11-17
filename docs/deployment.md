@@ -113,7 +113,10 @@ passes, as it does on SQLite. That run found one fault SQLite had hidden: `asset
 These could not be exercised on the machine the deployment work was done on (no room for Docker builds, no
 credentials), so the first CI run and the first deploy are their test:
 
-- The Docker images building and starting.
+- The web Docker image building and starting. (The API image was built on 17 November 2026 and started against
+  PostgreSQL 16 in Docker: it migrated to `0002_asset_seed_bigint`, answered `/api/v1/health`, passed
+  `python -m app.checks` with warnings only, and refused a placeholder secret in production. The web image ran out
+  of disk on that machine before it finished.)
 - `render.yaml`.
 - S3 storage, SMTP delivery against a real server, and every AI and Google integration (no credentials).
 - An IDML package opened in Adobe InDesign.
