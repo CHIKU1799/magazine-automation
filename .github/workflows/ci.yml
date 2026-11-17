@@ -33,7 +33,6 @@ jobs:
       - run: uv sync --extra postgres --extra s3
       - name: Tests on SQLite
         run: uv run pytest
-      # First exercised by CI itself: there was no PostgreSQL server on the machine this was written on.
       - name: Tests on PostgreSQL (real migration, real queue locking)
         env:
           TEST_DATABASE_URL: postgresql://pressflow:pressflow@localhost:5432/pressflow

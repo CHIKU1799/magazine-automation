@@ -31,7 +31,8 @@ def test_production_refuses_missing_short_or_placeholder_secrets():
 
 
 def test_production_issues_lists_blockers_and_clears_when_configured():
-    errors, _ = Settings(env="production", secret_key=GOOD_SECRET, _env_file=None).production_issues()
+    errors, _ = Settings(env="production", secret_key=GOOD_SECRET, database_url="sqlite:///./var/pressflow.db",
+                         _env_file=None).production_issues()
     text = " ".join(errors)
     for needle in ("SQLite", "COOKIE_SECURE", "FRONTEND_URL", "CORS_ORIGINS"):
         assert needle in text
@@ -53,7 +54,8 @@ def test_checks_command_reports_the_test_environment(capsys):
     code = run()
     out = capsys.readouterr().out
     assert "database reachable and migrated" in out and "storage:" in out
-    assert code == 1 and "SQLite" in out            # the test environment is, correctly, not production-ready
+    assert code == 1 and "FRONTEND_URL" in out      # the test environment is, correctly, not production-ready
+    assert ("SQLite" in out) == get_settings().is_sqlite   # the suite also runs on PostgreSQL in CI
 
 
 def _signup(client, email):

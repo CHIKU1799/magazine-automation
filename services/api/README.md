@@ -60,7 +60,7 @@ app/
     template_specs.py templates.py page_builder.py composer.py (ports of the frontend's specs/geometry/compose)
     preflight.py contract.py exports.py reference_jobs.py integrations.py demo_import.py template_store.py ...
   contracts/         bundled copy of packages/contracts/layout-contract.schema.json (test asserts it matches)
-alembic/             migrations (0001_initial — verified on SQLite; DDL renders JSONB on PostgreSQL)
+alembic/             migrations (0001_initial, 0002_asset_seed_bigint; the suite passes on SQLite and PostgreSQL 16)
 scripts/             seed.py, make_sample_reference.py
 tests/               pytest suite + fixtures/sample-reference.pdf
 ```

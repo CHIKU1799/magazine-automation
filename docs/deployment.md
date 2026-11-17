@@ -101,14 +101,19 @@ This runs Postgres, MinIO with a bucket bootstrap, the API, the worker and the w
 4. Run `python -m app.checks` against the production environment and clear every error.
 5. With the bridge running, confirm that `python -m pressflow_bridge --check` passes on the render machine.
 
+## Verified on PostgreSQL
+
+The whole API suite was run against PostgreSQL 16 on 17 November 2026 (real migrations, real queue locking) and
+passes, as it does on SQLite. That run found one fault SQLite had hidden: `assets.seed` was a 32-bit column holding
+32-bit unsigned hashes, so about half of picture inserts were rejected. Migration `0002_asset_seed_bigint` fixes it;
+`alembic upgrade head` (run by the API container on start) applies it.
+
 ## Not yet verified
 
-These could not be exercised on the machine the deployment work was done on (no Docker daemon, no PostgreSQL
-server), so the first CI run and the first deploy are their test:
+These could not be exercised on the machine the deployment work was done on (no room for Docker builds, no
+credentials), so the first CI run and the first deploy are their test:
 
 - The Docker images building and starting.
-- The API on PostgreSQL at runtime. Migrations are rendered offline for PostgreSQL and the CI workflow runs the
-  whole suite against a PostgreSQL service.
 - `render.yaml`.
 - S3 storage, SMTP delivery against a real server, and every AI and Google integration (no credentials).
 - An IDML package opened in Adobe InDesign.
